@@ -1,0 +1,14 @@
+# Static analysis configuration. The architecture-boundary guardrails (pure
+# decision layers, services that don't authorize) are enforced as tests in
+# internal/arch, so this file focuses on general correctness and hygiene.
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell

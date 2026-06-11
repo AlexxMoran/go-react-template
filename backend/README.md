@@ -27,7 +27,7 @@ idiomatic Go, and ships with everything a new service needs on day one:
 
 | Concern | Choice | Why |
 |---|---|---|
-| Router | stdlib `net/http` + [chi](https://github.com/go-chi/chi) | Idiomatic, no framework lock-in; the Mat Ryer / Grafana "`NewServer` + `routes`" pattern. |
+| Router | [Gin](https://github.com/gin-gonic/gin) | Fast, ergonomic HTTP routing and handler helpers while keeping framework code at the HTTP boundary. |
 | DB driver | pgx/v5 | Fastest, most complete PostgreSQL driver. |
 | Queries | sqlc | Write SQL, get type-safe Go. Zero runtime reflection. Clean read/write split. |
 | Migrations | [goose](https://github.com/pressly/goose) | Simple, plain-SQL, runs as a one-shot container. |
@@ -73,7 +73,7 @@ db/
 | `repository` | writes (INSERT/UPDATE/DELETE) | contain business rules |
 | `queries` / `search` | reads (SELECT) | mutate |
 | `policy` | answer "can this actor do X?" | touch the database |
-| `decisions` (in operations) | **pure** business rules over a snapshot | import a DB driver, HTTP, or chi |
+| `decisions` (in operations) | **pure** business rules over a snapshot | import a DB driver, HTTP, or Gin |
 
 ### The operation pattern
 
@@ -177,6 +177,7 @@ curl -s -X POST localhost:3000/api/v1/articles/1/publish -H "Authorization: Bear
 make help            # list all targets
 make run             # run the API locally
 make test            # run all tests (incl. architecture guardrails)
+make fmt / fmt-check # apply or verify Go formatting rules
 make vet / make lint # static analysis
 make sqlc            # regenerate type-safe DB code after editing db/queries
 make migrate-up      # apply migrations

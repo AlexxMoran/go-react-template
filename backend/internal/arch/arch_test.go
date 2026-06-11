@@ -79,7 +79,7 @@ func TestDecisionsArePure(t *testing.T) {
 		"github.com/jackc/pgx",
 		"/database/gen",
 		"net/http",
-		"github.com/go-chi/chi",
+		"github.com/gin-gonic/gin",
 	}
 
 	checked := 0
@@ -100,6 +100,31 @@ func TestDecisionsArePure(t *testing.T) {
 	if checked == 0 {
 		t.Fatal("no operation decisions.go files were checked")
 	}
+}
+
+// TestGinStaysAtHTTPBoundary keeps the framework context from leaking into
+// services, repositories, policies, and operation internals.
+func TestGinStaysAtHTTPBoundary(t *testing.T) {
+	root := moduleRoot(t)
+	allowedFiles := map[string]bool{
+		"server.go":     true,
+		"handler.go":    true,
+		"routes.go":     true,
+		"middleware.go": true,
+		"httpx.go":      true,
+	}
+	walkGoFiles(t, filepath.Join(root, "internal"), func(path string) {
+		for _, imp := range imports(t, path) {
+			if imp != "github.com/gin-gonic/gin" {
+				continue
+			}
+			if allowedFiles[filepath.Base(path)] {
+				continue
+			}
+			rel, _ := filepath.Rel(root, path)
+			t.Errorf("%s: gin must stay at the HTTP boundary", rel)
+		}
+	})
 }
 
 // TestServicesDoNotAuthorize enforces that domain service files never perform

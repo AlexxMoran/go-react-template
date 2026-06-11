@@ -1,14 +1,67 @@
-# Static analysis configuration. The architecture-boundary guardrails (pure
-# decision layers, services that don't authorize) are enforced as tests in
-# internal/arch, so this file focuses on general correctness and hygiene.
+version: "2"
+
+# Static analysis configuration. Architecture-boundary guardrails are enforced
+# as tests in internal/arch; this file focuses on correctness, security,
+# formatting, and everyday code hygiene.
 run:
   timeout: 5m
+  relative-path-mode: gomod
+  modules-download-mode: readonly
 
 linters:
+  default: standard
   enable:
-    - errcheck
-    - govet
-    - ineffassign
-    - staticcheck
-    - unused
+    - asciicheck
+    - bodyclose
+    - copyloopvar
+    - durationcheck
+    - errorlint
+    - gocritic
+    - gosec
     - misspell
+    - nilerr
+    - noctx
+    - revive
+    - sloglint
+    - unconvert
+    - unparam
+    - wastedassign
+    - whitespace
+  settings:
+    gosec:
+      excludes:
+        # Bounds are enforced before DB pagination calls; keeping G115 enabled
+        # globally is noisy for this template's int -> sqlc int32 conversions.
+        - G115
+        # Refresh cookies are secure in production via config validation, but
+        # intentionally may be insecure in local development.
+        - G124
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+  exclusions:
+    generated: strict
+    presets:
+      - common-false-positives
+      - legacy
+      - std-error-handling
+
+formatters:
+  enable:
+    - gofmt
+    - gofumpt
+    - goimports
+  settings:
+    gofumpt:
+      module-path: github.com/yourorg/goapp
+      extra-rules: true
+    goimports:
+      local-prefixes:
+        - github.com/yourorg/goapp
+  exclusions:
+    generated: strict
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

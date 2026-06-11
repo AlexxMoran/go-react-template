@@ -5,12 +5,11 @@
 package app
 
 import (
+	"log/slog"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
-	chimw "github.com/go-chi/chi/v5/middleware"
+	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"log/slog"
 
 	"github.com/yourorg/goapp/internal/article"
 	"github.com/yourorg/goapp/internal/auth"
@@ -38,32 +37,32 @@ func NewServer(cfg config.Config, logger *slog.Logger, pool *pgxpool.Pool) http.
 	requireAuth := authz.RequireAuth(logger)
 
 	// ── router ──────────────────────────────────────────────────────────────
-	r := chi.NewRouter()
-	r.Use(chimw.RequestID)
-	r.Use(chimw.RealIP)
+	if cfg.IsProduction() {
+		gin.SetMode(gin.ReleaseMode)
+	}
+	r := gin.New()
+	r.Use(middleware.RequestID())
 	r.Use(middleware.RequestLogger(logger))
 	r.Use(middleware.Recoverer(logger))
 	r.Use(middleware.CORS(cfg.CORS.AllowedOrigins))
 
-	r.Get("/health", health)
+	r.GET("/health", health)
 
-	r.Route("/api", func(r chi.Router) {
-		// Optional authentication for the whole API surface: populates the actor
-		// when a valid token is present; protected routes additionally use
-		// requireAuth.
-		r.Use(authenticate)
+	api := r.Group("/api")
+	// Optional authentication for the whole API surface: populates the actor
+	// when a valid token is present; protected routes additionally use
+	// requireAuth.
+	api.Use(authenticate)
 
-		r.Mount("/auth", authHandler.Routes(requireAuth))
+	authHandler.RegisterRoutes(api.Group("/auth"), requireAuth)
 
-		r.Route("/v1", func(r chi.Router) {
-			r.Mount("/users", userHandler.Routes(requireAuth))
-			r.Mount("/articles", articleHandler.Routes(requireAuth))
-		})
-	})
+	v1 := api.Group("/v1")
+	userHandler.RegisterRoutes(v1.Group("/users"), requireAuth)
+	articleHandler.RegisterRoutes(v1.Group("/articles"), requireAuth)
 
 	return r
 }
 
-func health(w http.ResponseWriter, _ *http.Request) {
-	httpx.JSON(w, http.StatusOK, map[string]string{"status": "ok"})
+func health(c *gin.Context) {
+	httpx.JSON(c, http.StatusOK, map[string]string{"status": "ok"})
 }

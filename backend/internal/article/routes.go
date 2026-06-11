@@ -1,26 +1,19 @@
 package article
 
 import (
-	"net/http"
-
-	"github.com/go-chi/chi/v5"
+	"github.com/gin-gonic/gin"
 )
 
-// Routes returns the article sub-router. List and Get allow anonymous access
+// RegisterRoutes mounts the article routes. List and Get allow anonymous access
 // (the policy still hides drafts); mutations require authentication.
-func (h *Handler) Routes(requireAuth func(http.Handler) http.Handler) http.Handler {
-	r := chi.NewRouter()
+func (h *Handler) RegisterRoutes(r gin.IRouter, requireAuth gin.HandlerFunc) {
+	r.GET("/", h.List)
+	r.GET("/:id", h.Get)
 
-	r.Get("/", h.List)
-	r.Get("/{id}", h.Get)
-
-	r.Group(func(r chi.Router) {
-		r.Use(requireAuth)
-		r.Post("/", h.Create)
-		r.Patch("/{id}", h.Update)
-		r.Delete("/{id}", h.Delete)
-		r.Post("/{id}/publish", h.Publish)
-	})
-
-	return r
+	protected := r.Group("/")
+	protected.Use(requireAuth)
+	protected.POST("/", h.Create)
+	protected.PATCH("/:id", h.Update)
+	protected.DELETE("/:id", h.Delete)
+	protected.POST("/:id/publish", h.Publish)
 }

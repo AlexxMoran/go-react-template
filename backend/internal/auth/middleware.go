@@ -2,8 +2,9 @@ package auth
 
 import (
 	"log/slog"
-	"net/http"
 	"strings"
+
+	"github.com/gin-gonic/gin"
 
 	"github.com/yourorg/goapp/internal/platform/authz"
 	"github.com/yourorg/goapp/internal/platform/httpx"
@@ -16,30 +17,32 @@ import (
 //
 // This is the counterpart to FastAPI's `current_user_or_none`. Routes that
 // require an authenticated user additionally apply authz.RequireAuth.
-func Authenticate(jwtm *JWTManager, logger *slog.Logger) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			header := r.Header.Get("Authorization")
-			if header == "" {
-				next.ServeHTTP(w, r)
-				return
-			}
-			token, ok := strings.CutPrefix(header, "Bearer ")
-			if !ok || token == "" {
-				httpx.WriteError(w, logger, apperror.Unauthorized("invalid_token", "Malformed Authorization header"))
-				return
-			}
-			claims, err := jwtm.ParseAccess(token)
-			if err != nil {
-				httpx.WriteError(w, logger, err)
-				return
-			}
-			actor, err := claims.Actor()
-			if err != nil {
-				httpx.WriteError(w, logger, err)
-				return
-			}
-			next.ServeHTTP(w, r.WithContext(authz.WithActor(r.Context(), actor)))
-		})
+func Authenticate(jwtm *JWTManager, logger *slog.Logger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		header := c.GetHeader("Authorization")
+		if header == "" {
+			c.Next()
+			return
+		}
+		token, ok := strings.CutPrefix(header, "Bearer ")
+		if !ok || token == "" {
+			httpx.WriteError(c, logger, apperror.Unauthorized("invalid_token", "Malformed Authorization header"))
+			c.Abort()
+			return
+		}
+		claims, err := jwtm.ParseAccess(token)
+		if err != nil {
+			httpx.WriteError(c, logger, err)
+			c.Abort()
+			return
+		}
+		actor, err := claims.Actor()
+		if err != nil {
+			httpx.WriteError(c, logger, err)
+			c.Abort()
+			return
+		}
+		c.Request = c.Request.WithContext(authz.WithActor(c.Request.Context(), actor))
+		c.Next()
 	}
 }

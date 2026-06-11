@@ -8,10 +8,11 @@ package httpx
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strconv"
+
+	"github.com/gin-gonic/gin"
 
 	"github.com/yourorg/goapp/pkg/apperror"
 )
@@ -42,35 +43,31 @@ type PaginatedResponse[T any] struct {
 }
 
 // Data writes a 1xx-2xx single-resource response.
-func Data[T any](w http.ResponseWriter, status int, data T) {
-	JSON(w, status, DataResponse[T]{Data: data})
+func Data[T any](c *gin.Context, status int, data T) {
+	JSON(c, status, DataResponse[T]{Data: data})
 }
 
 // JSON serializes v as JSON with the given status code.
-func JSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	if v != nil {
-		_ = json.NewEncoder(w).Encode(v)
-	}
+func JSON(c *gin.Context, status int, v any) {
+	c.JSON(status, v)
 }
 
 // Decode parses the JSON request body into T.
-func Decode[T any](r *http.Request) (T, error) {
+func Decode[T any](c *gin.Context) (T, error) {
 	var v T
-	if err := json.NewDecoder(r.Body).Decode(&v); err != nil {
+	if err := c.ShouldBindJSON(&v); err != nil {
 		return v, apperror.BadRequest("invalid_body", "Request body is not valid JSON")
 	}
 	return v, nil
 }
 
 // DecodeValid parses the JSON body into T and runs its Valid method.
-func DecodeValid[T Validator](r *http.Request) (T, error) {
-	v, err := Decode[T](r)
+func DecodeValid[T Validator](c *gin.Context) (T, error) {
+	v, err := Decode[T](c)
 	if err != nil {
 		return v, err
 	}
-	if problems := v.Valid(r.Context()); len(problems) > 0 {
+	if problems := v.Valid(c.Request.Context()); len(problems) > 0 {
 		return v, apperror.Validation("Validation failed", problems)
 	}
 	return v, nil
@@ -88,7 +85,7 @@ type errorBody struct {
 
 // WriteError renders err as a JSON error envelope. Non-apperror errors are
 // treated as internal (500) and their detail is logged but never leaked.
-func WriteError(w http.ResponseWriter, logger *slog.Logger, err error) {
+func WriteError(c *gin.Context, logger *slog.Logger, err error) {
 	appErr, ok := apperror.As(err)
 	if !ok {
 		appErr = apperror.Internal(err)
@@ -96,7 +93,7 @@ func WriteError(w http.ResponseWriter, logger *slog.Logger, err error) {
 	if appErr.Status >= http.StatusInternalServerError && logger != nil {
 		logger.Error("request failed", slog.String("message_key", appErr.MessageKey), slog.Any("err", appErr.Err))
 	}
-	JSON(w, appErr.Status, errorEnvelope{Error: errorBody{
+	JSON(c, appErr.Status, errorEnvelope{Error: errorBody{
 		Message:    appErr.Message,
 		MessageKey: appErr.MessageKey,
 		Fields:     appErr.Fields,
@@ -104,12 +101,12 @@ func WriteError(w http.ResponseWriter, logger *slog.Logger, err error) {
 }
 
 // Pagination extracts skip/limit query parameters with sane bounds.
-func Pagination(r *http.Request) (skip, limit int) {
-	skip = atoiDefault(r.URL.Query().Get("skip"), 0)
+func Pagination(c *gin.Context) (skip, limit int) {
+	skip = atoiDefault(c.Query("skip"), 0)
 	if skip < 0 {
 		skip = 0
 	}
-	limit = atoiDefault(r.URL.Query().Get("limit"), defaultLimit)
+	limit = atoiDefault(c.Query("limit"), defaultLimit)
 	if limit <= 0 {
 		limit = defaultLimit
 	}

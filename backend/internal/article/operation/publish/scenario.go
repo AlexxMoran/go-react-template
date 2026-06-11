@@ -27,7 +27,7 @@ func (s *Scenario) Run(ctx context.Context, c Contract) (gen.Article, error) {
 	if err != nil {
 		return gen.Article{}, apperror.Internal(err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	gateway := NewGateway(tx)
 

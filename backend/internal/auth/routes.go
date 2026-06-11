@@ -1,26 +1,19 @@
 package auth
 
 import (
-	"net/http"
-
-	"github.com/go-chi/chi/v5"
+	"github.com/gin-gonic/gin"
 )
 
-// Routes returns the auth sub-router. Public endpoints are open; /me endpoints
-// are wrapped with the provided requireAuth middleware.
-func (h *Handler) Routes(requireAuth func(http.Handler) http.Handler) http.Handler {
-	r := chi.NewRouter()
+// RegisterRoutes mounts the auth routes. Public endpoints are open; /me
+// endpoints are wrapped with the provided requireAuth middleware.
+func (h *Handler) RegisterRoutes(r gin.IRouter, requireAuth gin.HandlerFunc) {
+	r.POST("/register", h.Register)
+	r.POST("/login", h.Login)
+	r.POST("/refresh", h.Refresh)
+	r.POST("/logout", h.Logout)
 
-	r.Post("/register", h.Register)
-	r.Post("/login", h.Login)
-	r.Post("/refresh", h.Refresh)
-	r.Post("/logout", h.Logout)
-
-	r.Group(func(r chi.Router) {
-		r.Use(requireAuth)
-		r.Get("/me", h.Me)
-		r.Patch("/me", h.UpdateMe)
-	})
-
-	return r
+	protected := r.Group("/")
+	protected.Use(requireAuth)
+	protected.GET("/me", h.Me)
+	protected.PATCH("/me", h.UpdateMe)
 }

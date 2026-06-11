@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/go-chi/chi/v5"
+	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/yourorg/goapp/internal/article/operation/publish"
@@ -32,24 +32,24 @@ func NewHandler(pool *pgxpool.Pool, logger *slog.Logger) *Handler {
 	}
 }
 
-func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
-	actor, _ := authz.ActorFrom(r.Context())
-	skip, limit := httpx.Pagination(r)
-	filter := parseListFilter(r)
+func (h *Handler) List(c *gin.Context) {
+	actor, _ := authz.ActorFrom(c.Request.Context())
+	skip, limit := httpx.Pagination(c)
+	filter := parseListFilter(c)
 
-	articles, err := h.search.List(r.Context(), filter, skip, limit)
+	articles, err := h.search.List(c.Request.Context(), filter, skip, limit)
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(c, h.logger, err)
 		return
 	}
-	filteredCount, err := h.search.Count(r.Context(), filter)
+	filteredCount, err := h.search.Count(c.Request.Context(), filter)
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(c, h.logger, err)
 		return
 	}
-	totalCount, err := h.search.Count(r.Context(), ListFilter{})
+	totalCount, err := h.search.Count(c.Request.Context(), ListFilter{})
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(c, h.logger, err)
 		return
 	}
 
@@ -60,7 +60,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		data = append(data, resp)
 	}
 
-	httpx.JSON(w, http.StatusOK, httpx.PaginatedResponse[Response]{
+	httpx.JSON(c, http.StatusOK, httpx.PaginatedResponse[Response]{
 		Data:          data,
 		Skip:          skip,
 		Limit:         limit,
@@ -69,151 +69,150 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
-	actor, _ := authz.ActorFrom(r.Context())
-	id, err := parseIDParam(r)
+func (h *Handler) Get(c *gin.Context) {
+	actor, _ := authz.ActorFrom(c.Request.Context())
+	id, err := parseIDParam(c)
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(c, h.logger, err)
 		return
 	}
-	a, err := h.service.Get(r.Context(), id)
+	a, err := h.service.Get(c.Request.Context(), id)
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(c, h.logger, err)
 		return
 	}
 	policy := NewPolicy(actor, a)
 	if err := authz.Authorize(policy.CanView()); err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(c, h.logger, err)
 		return
 	}
 	resp := ToResponse(a)
 	resp.Permissions = policy.Permissions()
-	httpx.Data(w, http.StatusOK, resp)
+	httpx.Data(c, http.StatusOK, resp)
 }
 
-func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
-	actor, _ := authz.ActorFrom(r.Context())
+func (h *Handler) Create(c *gin.Context) {
+	actor, _ := authz.ActorFrom(c.Request.Context())
 	if err := authz.Authorize(NewPolicy(actor, Article{}).CanCreate()); err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(c, h.logger, err)
 		return
 	}
-	req, err := httpx.DecodeValid[CreateArticleRequest](r)
+	req, err := httpx.DecodeValid[CreateArticleRequest](c)
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(c, h.logger, err)
 		return
 	}
-	a, err := h.service.Create(r.Context(), actor.ID, req.Title, req.Content)
+	a, err := h.service.Create(c.Request.Context(), actor.ID, req.Title, req.Content)
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(c, h.logger, err)
 		return
 	}
 	resp := ToResponse(a)
 	resp.Permissions = NewPolicy(actor, a).Permissions()
-	httpx.Data(w, http.StatusCreated, resp)
+	httpx.Data(c, http.StatusCreated, resp)
 }
 
-func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
-	actor, _ := authz.ActorFrom(r.Context())
-	id, err := parseIDParam(r)
+func (h *Handler) Update(c *gin.Context) {
+	actor, _ := authz.ActorFrom(c.Request.Context())
+	id, err := parseIDParam(c)
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(c, h.logger, err)
 		return
 	}
-	a, err := h.service.Get(r.Context(), id)
+	a, err := h.service.Get(c.Request.Context(), id)
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(c, h.logger, err)
 		return
 	}
 	if err := authz.Authorize(NewPolicy(actor, a).CanEdit()); err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(c, h.logger, err)
 		return
 	}
-	req, err := httpx.DecodeValid[UpdateArticleRequest](r)
+	req, err := httpx.DecodeValid[UpdateArticleRequest](c)
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(c, h.logger, err)
 		return
 	}
-	updated, err := h.service.Update(r.Context(), id, req.Title, req.Content)
+	updated, err := h.service.Update(c.Request.Context(), id, req.Title, req.Content)
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(c, h.logger, err)
 		return
 	}
 	resp := ToResponse(updated)
 	resp.Permissions = NewPolicy(actor, updated).Permissions()
-	httpx.Data(w, http.StatusOK, resp)
+	httpx.Data(c, http.StatusOK, resp)
 }
 
-func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
-	actor, _ := authz.ActorFrom(r.Context())
-	id, err := parseIDParam(r)
+func (h *Handler) Delete(c *gin.Context) {
+	actor, _ := authz.ActorFrom(c.Request.Context())
+	id, err := parseIDParam(c)
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(c, h.logger, err)
 		return
 	}
-	a, err := h.service.Get(r.Context(), id)
+	a, err := h.service.Get(c.Request.Context(), id)
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(c, h.logger, err)
 		return
 	}
 	if err := authz.Authorize(NewPolicy(actor, a).CanDelete()); err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(c, h.logger, err)
 		return
 	}
-	if err := h.service.Delete(r.Context(), id); err != nil {
-		httpx.WriteError(w, h.logger, err)
+	if err := h.service.Delete(c.Request.Context(), id); err != nil {
+		httpx.WriteError(c, h.logger, err)
 		return
 	}
-	httpx.Data(w, http.StatusOK, "Article deleted successfully")
+	httpx.Data(c, http.StatusOK, "Article deleted successfully")
 }
 
 // Publish runs the multi-step publish operation.
-func (h *Handler) Publish(w http.ResponseWriter, r *http.Request) {
-	actor, _ := authz.ActorFrom(r.Context())
-	id, err := parseIDParam(r)
+func (h *Handler) Publish(c *gin.Context) {
+	actor, _ := authz.ActorFrom(c.Request.Context())
+	id, err := parseIDParam(c)
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(c, h.logger, err)
 		return
 	}
-	a, err := h.service.Get(r.Context(), id)
+	a, err := h.service.Get(c.Request.Context(), id)
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(c, h.logger, err)
 		return
 	}
 	if err := authz.Authorize(NewPolicy(actor, a).CanPublish()); err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(c, h.logger, err)
 		return
 	}
-	row, err := publish.NewScenario(h.pool).Run(r.Context(), publish.Contract{ArticleID: id})
+	row, err := publish.NewScenario(h.pool).Run(c.Request.Context(), publish.Contract{ArticleID: id})
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(c, h.logger, err)
 		return
 	}
 	updated := fromGen(row)
 	resp := ToResponse(updated)
 	resp.Permissions = NewPolicy(actor, updated).Permissions()
-	httpx.Data(w, http.StatusOK, resp)
+	httpx.Data(c, http.StatusOK, resp)
 }
 
-func parseListFilter(r *http.Request) ListFilter {
-	q := r.URL.Query()
+func parseListFilter(c *gin.Context) ListFilter {
 	filter := ListFilter{}
-	if s := q.Get("status"); s != "" {
+	if s := c.Query("status"); s != "" {
 		status := Status(s)
 		filter.Status = &status
 	}
-	if a := q.Get("author_id"); a != "" {
+	if a := c.Query("author_id"); a != "" {
 		if id, err := strconv.ParseInt(a, 10, 64); err == nil {
 			filter.AuthorID = &id
 		}
 	}
-	if s := q.Get("search"); s != "" {
+	if s := c.Query("search"); s != "" {
 		filter.Search = &s
 	}
 	return filter
 }
 
-func parseIDParam(r *http.Request) (int64, error) {
-	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+func parseIDParam(c *gin.Context) (int64, error) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		return 0, apperror.BadRequest("invalid_id", "Invalid resource id")
 	}

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gin-gonic/gin"
+
 	"github.com/yourorg/goapp/internal/platform/authz"
 	"github.com/yourorg/goapp/internal/platform/config"
 	"github.com/yourorg/goapp/internal/platform/httpx"
@@ -28,90 +30,90 @@ func NewHandler(svc *Service, userQ *user.Queries, cookie config.CookieConfig, r
 	return &Handler{svc: svc, userQ: userQ, cookie: cookie, refreshTTL: refreshTTL, logger: logger}
 }
 
-func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
-	req, err := httpx.DecodeValid[RegisterRequest](r)
+func (h *Handler) Register(c *gin.Context) {
+	req, err := httpx.DecodeValid[RegisterRequest](c)
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(c, h.logger, err)
 		return
 	}
-	u, err := h.svc.Register(r.Context(), strings.ToLower(strings.TrimSpace(req.Email)), req.Password, req.FirstName, req.LastName)
+	u, err := h.svc.Register(c.Request.Context(), strings.ToLower(strings.TrimSpace(req.Email)), req.Password, req.FirstName, req.LastName)
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(c, h.logger, err)
 		return
 	}
-	httpx.Data(w, http.StatusCreated, user.ToResponse(u))
+	httpx.Data(c, http.StatusCreated, user.ToResponse(u))
 }
 
-func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
-	req, err := httpx.DecodeValid[LoginRequest](r)
+func (h *Handler) Login(c *gin.Context) {
+	req, err := httpx.DecodeValid[LoginRequest](c)
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(c, h.logger, err)
 		return
 	}
-	_, pair, err := h.svc.Login(r.Context(), strings.ToLower(strings.TrimSpace(req.Email)), req.Password)
+	_, pair, err := h.svc.Login(c.Request.Context(), strings.ToLower(strings.TrimSpace(req.Email)), req.Password)
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(c, h.logger, err)
 		return
 	}
-	h.setRefreshCookie(w, pair.RefreshToken, pair.RefreshExpiresAt)
-	httpx.JSON(w, http.StatusOK, TokenResponse{AccessToken: pair.AccessToken, TokenType: "bearer"})
+	h.setRefreshCookie(c, pair.RefreshToken, pair.RefreshExpiresAt)
+	httpx.JSON(c, http.StatusOK, TokenResponse{AccessToken: pair.AccessToken, TokenType: "bearer"})
 }
 
-func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie(refreshCookieName)
-	if err != nil || cookie.Value == "" {
-		httpx.WriteError(w, h.logger, apperror.Unauthorized("missing_token", "Refresh token is missing"))
+func (h *Handler) Refresh(c *gin.Context) {
+	token, err := c.Cookie(refreshCookieName)
+	if err != nil || token == "" {
+		httpx.WriteError(c, h.logger, apperror.Unauthorized("missing_token", "Refresh token is missing"))
 		return
 	}
-	pair, err := h.svc.Refresh(r.Context(), cookie.Value)
+	pair, err := h.svc.Refresh(c.Request.Context(), token)
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(c, h.logger, err)
 		return
 	}
-	h.setRefreshCookie(w, pair.RefreshToken, pair.RefreshExpiresAt)
-	httpx.JSON(w, http.StatusOK, TokenResponse{AccessToken: pair.AccessToken, TokenType: "bearer"})
+	h.setRefreshCookie(c, pair.RefreshToken, pair.RefreshExpiresAt)
+	httpx.JSON(c, http.StatusOK, TokenResponse{AccessToken: pair.AccessToken, TokenType: "bearer"})
 }
 
-func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
-	if cookie, err := r.Cookie(refreshCookieName); err == nil {
-		_ = h.svc.Logout(r.Context(), cookie.Value)
+func (h *Handler) Logout(c *gin.Context) {
+	if token, err := c.Cookie(refreshCookieName); err == nil {
+		_ = h.svc.Logout(c.Request.Context(), token)
 	}
-	h.clearRefreshCookie(w)
-	httpx.JSON(w, http.StatusOK, map[string]string{"detail": "Successfully logged out"})
+	h.clearRefreshCookie(c)
+	httpx.JSON(c, http.StatusOK, map[string]string{"detail": "Successfully logged out"})
 }
 
 // Me returns the current user with their global permission map.
-func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
-	actor, _ := authz.ActorFrom(r.Context())
-	u, err := h.userQ.GetByID(r.Context(), actor.ID)
+func (h *Handler) Me(c *gin.Context) {
+	actor, _ := authz.ActorFrom(c.Request.Context())
+	u, err := h.userQ.GetByID(c.Request.Context(), actor.ID)
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(c, h.logger, err)
 		return
 	}
 	resp := user.ToResponse(u)
 	resp.Permissions = user.NewPolicy(actor, u).Permissions()
-	httpx.Data(w, http.StatusOK, resp)
+	httpx.Data(c, http.StatusOK, resp)
 }
 
-func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
-	actor, _ := authz.ActorFrom(r.Context())
-	req, err := httpx.DecodeValid[UpdateProfileRequest](r)
+func (h *Handler) UpdateMe(c *gin.Context) {
+	actor, _ := authz.ActorFrom(c.Request.Context())
+	req, err := httpx.DecodeValid[UpdateProfileRequest](c)
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(c, h.logger, err)
 		return
 	}
-	u, err := h.svc.UpdateProfile(r.Context(), actor.ID, req.FirstName, req.LastName)
+	u, err := h.svc.UpdateProfile(c.Request.Context(), actor.ID, req.FirstName, req.LastName)
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(c, h.logger, err)
 		return
 	}
-	httpx.Data(w, http.StatusOK, user.ToResponse(u))
+	httpx.Data(c, http.StatusOK, user.ToResponse(u))
 }
 
 // ── cookie helpers ───────────────────────────────────────────────────────────
 
-func (h *Handler) setRefreshCookie(w http.ResponseWriter, token string, expires time.Time) {
-	http.SetCookie(w, &http.Cookie{
+func (h *Handler) setRefreshCookie(c *gin.Context, token string, expires time.Time) {
+	http.SetCookie(c.Writer, &http.Cookie{
 		Name:     refreshCookieName,
 		Value:    token,
 		Path:     "/api/auth",
@@ -124,8 +126,8 @@ func (h *Handler) setRefreshCookie(w http.ResponseWriter, token string, expires 
 	})
 }
 
-func (h *Handler) clearRefreshCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
+func (h *Handler) clearRefreshCookie(c *gin.Context) {
+	http.SetCookie(c.Writer, &http.Cookie{
 		Name:     refreshCookieName,
 		Value:    "",
 		Path:     "/api/auth",

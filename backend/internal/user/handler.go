@@ -4,7 +4,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
+	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/yourorg/goapp/internal/platform/authz"
@@ -21,30 +21,26 @@ func NewHandler(pool *pgxpool.Pool, logger *slog.Logger) *Handler {
 	return &Handler{queries: NewQueries(pool), logger: logger}
 }
 
-// Routes returns the user sub-router. Listing the directory requires
+// RegisterRoutes mounts the user routes. Listing the directory requires
 // authentication (any signed-in user); tighten with authz.RequireRoleMW if you
 // want it admin-only.
-func (h *Handler) Routes(requireAuth func(http.Handler) http.Handler) http.Handler {
-	r := chi.NewRouter()
-	r.Group(func(r chi.Router) {
-		r.Use(requireAuth)
-		r.Get("/", h.List)
-	})
-	return r
+func (h *Handler) RegisterRoutes(r gin.IRouter, requireAuth gin.HandlerFunc) {
+	r.Use(requireAuth)
+	r.GET("/", h.List)
 }
 
-func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
-	actor, _ := authz.ActorFrom(r.Context())
-	skip, limit := httpx.Pagination(r)
+func (h *Handler) List(c *gin.Context) {
+	actor, _ := authz.ActorFrom(c.Request.Context())
+	skip, limit := httpx.Pagination(c)
 
-	users, err := h.queries.List(r.Context(), skip, limit)
+	users, err := h.queries.List(c.Request.Context(), skip, limit)
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(c, h.logger, err)
 		return
 	}
-	total, err := h.queries.Count(r.Context())
+	total, err := h.queries.Count(c.Request.Context())
 	if err != nil {
-		httpx.WriteError(w, h.logger, err)
+		httpx.WriteError(c, h.logger, err)
 		return
 	}
 
@@ -55,7 +51,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		data = append(data, resp)
 	}
 
-	httpx.JSON(w, http.StatusOK, httpx.PaginatedResponse[Response]{
+	httpx.JSON(c, http.StatusOK, httpx.PaginatedResponse[Response]{
 		Data:          data,
 		Skip:          skip,
 		Limit:         limit,

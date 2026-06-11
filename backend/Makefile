@@ -46,7 +46,12 @@ vet:
 ## fmt: format the codebase
 .PHONY: fmt
 fmt:
-	gofmt -s -w .
+	golangci-lint run --fix
+
+## fmt-check: verify formatting without changing files
+.PHONY: fmt-check
+fmt-check:
+	golangci-lint run
 
 ## lint: run golangci-lint (requires golangci-lint installed)
 .PHONY: lint

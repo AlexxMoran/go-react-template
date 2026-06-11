@@ -54,7 +54,9 @@ internal/
     database/           pgx pool + sqlc-generated code (gen/)
     logger/             slog setup
     httpx/              response envelopes, decode/validate, error rendering
-    middleware/         recover, request logging, CORS
+    middleware/         request id, logging, recover, security headers, CORS,
+                        rate limit, body-size limit, request timeout
+    health/             framework-agnostic liveness/readiness checks
     authz/              Actor, RBAC roles, Authorize(), auth middleware
   auth/                 authentication module: JWT, password, login/refresh/logout/me
   user/                 user module (minimal): facade + read/write internals
@@ -208,7 +210,14 @@ cp .env.example .env          # adjust secrets
 make docker-up                # builds images, runs migrations, starts the API
 ```
 
-API: <http://localhost:3000> · health: <http://localhost:3000/health>
+API: <http://localhost:3000> · liveness: `/health/live` · readiness (pings the
+DB): `/health/ready`
+
+> **HTTP hardening.** Every request passes through security headers, a per-IP
+> token-bucket **rate limiter** (`RATE_LIMIT_*`), a **body-size limit**
+> (`HTTP_MAX_BODY_BYTES`) and a **request timeout** (`HTTP_REQUEST_TIMEOUT`) that
+> cancels the request context. Health probes are exempt from the limiter and
+> timeout so orchestrators can poll them freely.
 
 ### Locally
 

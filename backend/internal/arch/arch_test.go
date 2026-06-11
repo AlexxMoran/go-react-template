@@ -160,22 +160,25 @@ func moduleOf(path, internalDir string) string {
 }
 
 // TestGinStaysAtHTTPBoundary keeps the framework context from leaking into
-// services, repositories, policies, and operation internals.
+// services, repositories, policies, and operation internals. Gin is allowed at
+// the HTTP boundary: the transport files (server/handler/routes/httpx) and the
+// whole platform/middleware package, which exists precisely to hold cross-cutting
+// HTTP middleware.
 func TestGinStaysAtHTTPBoundary(t *testing.T) {
 	root := moduleRoot(t)
 	allowedFiles := map[string]bool{
 		"server.go":     true,
 		"handler.go":    true,
 		"routes.go":     true,
-		"middleware.go": true,
 		"httpx.go":      true,
+		"middleware.go": true, // domain-local HTTP middleware (auth, authz)
 	}
 	walkGoFiles(t, filepath.Join(root, "internal"), func(path string) {
 		for _, imp := range imports(t, path) {
 			if imp != "github.com/gin-gonic/gin" {
 				continue
 			}
-			if allowedFiles[filepath.Base(path)] {
+			if allowedFiles[filepath.Base(path)] || filepath.Base(filepath.Dir(path)) == "middleware" {
 				continue
 			}
 			rel, _ := filepath.Rel(root, path)

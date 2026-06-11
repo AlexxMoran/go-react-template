@@ -18,13 +18,14 @@ import (
 )
 
 type Config struct {
-	Env    string
-	Log    LogConfig
-	HTTP   HTTPConfig
-	DB     DBConfig
-	JWT    JWTConfig
-	Cookie CookieConfig
-	CORS   CORSConfig
+	Env       string
+	Log       LogConfig
+	HTTP      HTTPConfig
+	DB        DBConfig
+	JWT       JWTConfig
+	Cookie    CookieConfig
+	CORS      CORSConfig
+	RateLimit RateLimitConfig
 }
 
 type LogConfig struct {
@@ -37,6 +38,20 @@ type HTTPConfig struct {
 	ReadTimeout     time.Duration
 	WriteTimeout    time.Duration
 	ShutdownTimeout time.Duration
+	// RequestTimeout bounds how long a single handler may run; it is applied as a
+	// context deadline on each request so downstream DB calls are cancelled.
+	RequestTimeout time.Duration
+	// MaxBodyBytes caps the request body size (415/400 beyond it).
+	MaxBodyBytes int64
+}
+
+// RateLimitConfig configures the per-client-IP token-bucket rate limiter.
+type RateLimitConfig struct {
+	Enabled bool
+	// RPS is the sustained requests-per-second allowed per client IP.
+	RPS float64
+	// Burst is the maximum momentary burst above the sustained rate.
+	Burst int
 }
 
 func (h HTTPConfig) Addr() string {
@@ -106,6 +121,8 @@ func Load() (Config, error) {
 			ReadTimeout:     getenvDuration("HTTP_READ_TIMEOUT", 10*time.Second),
 			WriteTimeout:    getenvDuration("HTTP_WRITE_TIMEOUT", 15*time.Second),
 			ShutdownTimeout: getenvDuration("HTTP_SHUTDOWN_TIMEOUT", 15*time.Second),
+			RequestTimeout:  getenvDuration("HTTP_REQUEST_TIMEOUT", 15*time.Second),
+			MaxBodyBytes:    getenvInt64("HTTP_MAX_BODY_BYTES", 1<<20), // 1 MiB
 		},
 		DB: DBConfig{
 			Host:     getenv("DB_HOST", "localhost"),
@@ -131,6 +148,11 @@ func Load() (Config, error) {
 		},
 		CORS: CORSConfig{
 			AllowedOrigins: getenvCSV("CORS_ALLOWED_ORIGINS"),
+		},
+		RateLimit: RateLimitConfig{
+			Enabled: getenvBool("RATE_LIMIT_ENABLED", true),
+			RPS:     getenvFloat("RATE_LIMIT_RPS", 20),
+			Burst:   getenvInt("RATE_LIMIT_BURST", 40),
 		},
 	}
 
@@ -168,6 +190,24 @@ func getenvInt(key string, fallback int) int {
 	if v, ok := os.LookupEnv(key); ok && v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			return n
+		}
+	}
+	return fallback
+}
+
+func getenvInt64(key string, fallback int64) int64 {
+	if v, ok := os.LookupEnv(key); ok && v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			return n
+		}
+	}
+	return fallback
+}
+
+func getenvFloat(key string, fallback float64) float64 {
+	if v, ok := os.LookupEnv(key); ok && v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			return f
 		}
 	}
 	return fallback

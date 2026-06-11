@@ -76,6 +76,10 @@ func Conflict(messageKey, message string) *Error {
 	return New(http.StatusConflict, messageKey, message)
 }
 
+func TooManyRequests(messageKey, message string) *Error {
+	return New(http.StatusTooManyRequests, messageKey, message)
+}
+
 // Validation builds a 422 error with per-field messages.
 func Validation(message string, fields map[string]string) *Error {
 	return &Error{

@@ -5,8 +5,10 @@
 package app
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -15,6 +17,7 @@ import (
 	"github.com/yourorg/goapp/internal/auth"
 	"github.com/yourorg/goapp/internal/platform/authz"
 	"github.com/yourorg/goapp/internal/platform/config"
+	"github.com/yourorg/goapp/internal/platform/health"
 	"github.com/yourorg/goapp/internal/platform/httpx"
 	"github.com/yourorg/goapp/internal/platform/middleware"
 	"github.com/yourorg/goapp/internal/user"
@@ -44,12 +47,32 @@ func NewServer(cfg config.Config, logger *slog.Logger, pool *pgxpool.Pool) http.
 		gin.SetMode(gin.ReleaseMode)
 	}
 	r := gin.New()
+	// Derive ClientIP from the real connection only; behind a trusted proxy,
+	// replace nil with the proxy CIDRs so rate limiting can't be spoofed via
+	// X-Forwarded-For.
+	_ = r.SetTrustedProxies(nil)
+
+	// Global middleware — applies to everything below, including health probes.
 	r.Use(middleware.RequestID())
 	r.Use(middleware.RequestLogger(logger))
 	r.Use(middleware.Recoverer(logger))
+	r.Use(middleware.SecurityHeaders(cfg.Cookie.Secure))
 	r.Use(middleware.CORS(cfg.CORS.AllowedOrigins))
 
-	r.GET("/health", health)
+	// Health/readiness probes are registered before the rate limiter and request
+	// timeout, so frequent orchestrator probes are never throttled.
+	checker := health.New()
+	checker.Register("database", func(ctx context.Context) error { return pool.Ping(ctx) })
+	r.GET("/health", live)                 // liveness alias (kept for convenience)
+	r.GET("/health/live", live)            // is the process up?
+	r.GET("/health/ready", ready(checker)) // can it serve traffic? (pings the DB)
+
+	// Heavier protections apply to the API surface, not to health probes.
+	if cfg.RateLimit.Enabled {
+		r.Use(middleware.RateLimit(cfg.RateLimit.RPS, cfg.RateLimit.Burst, logger))
+	}
+	r.Use(middleware.BodySizeLimit(cfg.HTTP.MaxBodyBytes))
+	r.Use(middleware.Timeout(cfg.HTTP.RequestTimeout))
 
 	api := r.Group("/api")
 	// Optional authentication for the whole API surface: populates the actor
@@ -66,6 +89,30 @@ func NewServer(cfg config.Config, logger *slog.Logger, pool *pgxpool.Pool) http.
 	return r
 }
 
-func health(c *gin.Context) {
-	httpx.JSON(c, http.StatusOK, map[string]string{"status": "ok"})
+type healthResponse struct {
+	Status string            `json:"status"`
+	Checks map[string]string `json:"checks,omitempty"`
+}
+
+// live reports that the process is up and able to answer requests.
+func live(c *gin.Context) {
+	httpx.JSON(c, http.StatusOK, healthResponse{Status: "ok"})
+}
+
+// ready runs the dependency checks (e.g. a DB ping) and reports 200 when the
+// service can serve traffic, 503 otherwise.
+func ready(checker *health.Checker) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+		defer cancel()
+
+		ok, statuses := checker.Run(ctx)
+		status := http.StatusOK
+		word := "ok"
+		if !ok {
+			status = http.StatusServiceUnavailable
+			word = "unavailable"
+		}
+		httpx.JSON(c, status, healthResponse{Status: word, Checks: statuses})
+	}
 }

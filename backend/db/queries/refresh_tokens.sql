@@ -15,3 +15,9 @@ WHERE token_hash = $1 AND revoked_at IS NULL;
 UPDATE refresh_tokens
 SET revoked_at = now()
 WHERE user_id = $1 AND revoked_at IS NULL;
+
+-- name: DeleteExpiredRefreshTokens :execrows
+-- Removes tokens that can never be used again: expired or already revoked.
+-- Run periodically by a background job so the table does not grow unbounded.
+DELETE FROM refresh_tokens
+WHERE expires_at < now() OR revoked_at IS NOT NULL;

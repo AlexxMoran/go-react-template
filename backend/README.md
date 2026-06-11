@@ -58,14 +58,18 @@ internal/
                         rate limit, body-size limit, request timeout
     health/             framework-agnostic liveness/readiness checks
     authz/              Actor, RBAC roles, Authorize(), auth middleware
+    jobs/               asynq runtime (worker pool + scheduler + enqueue client)
+    mail/               email transport (Mailer port: log + SMTP)
+    cache/              read-through cache port (Redis + in-memory + no-op)
   auth/                 authentication module: JWT, password, login/refresh/logout/me
   user/                 user module (minimal): facade + read/write internals
     userapi/            published contract (User DTO, Response, Permissions)
+  notifications/        notifications module: composes/sends user-facing messages
   article/              reference module — full synthesis layout (see below)
     articleapi/         published contract (Response)
     domain/             pure core: model, status machine, policy, publish decision
     app/                application: operations (write) + queries (read) + facade
-    adapters/           PostgreSQL implementation of the app's Store port
+    adapters/           PostgreSQL implementation of the app's Store port (+ cache decorator)
     handler.go/routes.go/dto.go    HTTP boundary + wiring
 pkg/
   apperror/             the one application error type (status + message_key)
@@ -161,6 +165,62 @@ re-implementing the rules. This mirrors the source FastAPI project's
 
 ---
 
+## Background jobs
+
+Async work runs on [asynq](https://github.com/hibiken/asynq) (Redis-backed). The
+runtime lives in `platform/jobs` and is the only place that touches the broker:
+
+- **Client** — enqueues tasks; injected into producers (e.g. the auth handler
+  enqueues a welcome email after registration, best-effort).
+- **Server** — a worker pool plus a periodic **scheduler**, started and stopped in
+  `run.go` alongside the HTTP server.
+
+A module declares its tasks, handlers and schedule in a `jobs.go` file, and the
+composition root registers them (`auth.RegisterJobs`). asynq is confined to
+`platform/jobs` and `*/jobs.go` — `TestAsynqStaysAtJobsBoundary` enforces it, the
+same discipline as gin at the HTTP boundary, so domain and application code stay
+framework-free.
+
+Shipped examples (see [internal/auth/jobs.go](internal/auth/jobs.go)):
+
+| Task | Owner | Kind | What it does |
+|---|---|---|---|
+| `auth:purge_refresh_tokens` | auth | periodic (`@every 1h`) | deletes expired/revoked refresh tokens so the table stays bounded |
+| `notifications:welcome_email` | notifications | on-demand | enqueued after register; renders and sends the welcome email |
+
+Configure the broker and worker via `REDIS_*` and `JOBS_*` (see `.env.example`).
+`JOBS_ENABLED=false` runs an instance as API-only (it still enqueues; no worker
+consumes).
+
+> Enqueue is **not** transactional with the database — producers enqueue after
+> their write commits. For exactly-once delivery tied to a DB change, add a
+> transactional outbox (a planned extension).
+
+---
+
+## Email & caching
+
+**Email** is split the same way as jobs — transport vs. domain:
+
+- `platform/mail` is the **transport**: a `Mailer` port with a `log` driver
+  (prints, the dev default) and an `smtp` driver (Mailpit locally, a provider in
+  production). Configure with `MAIL_*` / `SMTP_*`.
+- The **`notifications` module** owns *what* is sent and *how it's composed*
+  (templates). Other modules never send email; they call a small port (e.g.
+  `auth.Notifier`) and notifications turns it into a message delivered via
+  `platform/mail`. In compose, Mailpit's inbox is at <http://localhost:8025>.
+
+**Caching** uses `platform/cache` (a `Cache` port: Redis, in-memory, or no-op).
+The reference module shows **cache-aside**: `article.Get` is read through a cache
+decorator over the `Store` port (`adapters/cached.go`), and any write
+(update/delete/publish) invalidates the entry — so the application layer is
+unaware caching exists. Toggle with `CACHE_ENABLED` / `CACHE_TTL`.
+
+**Seeding:** `make seed` inserts a demo admin, a user and a couple of articles
+(idempotent), so a fresh database is immediately usable.
+
+---
+
 ## Testing
 
 Two layers, split by where they live and what they touch:
@@ -223,8 +283,8 @@ DB): `/health/ready`
 
 ```bash
 cp .env.example .env
-# start only Postgres (compose) or point DB_* at your own instance
-docker compose up -d db
+# start Postgres + Redis (compose), or point DB_*/REDIS_* at your own instances
+docker compose up -d db redis
 DB_HOST=localhost make migrate-up
 make run
 ```
@@ -260,6 +320,7 @@ make fmt / fmt-check # apply or verify Go formatting rules
 make vet / make lint # static analysis
 make sqlc            # regenerate type-safe DB code after editing db/queries
 make migrate-up      # apply migrations
+make seed            # insert demo data (admin/user/articles); idempotent
 make migrate-create name=add_widgets
 make docker-up       # full stack via docker compose
 ```

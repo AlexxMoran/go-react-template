@@ -8,7 +8,7 @@ single `docker compose up`.
 go-react-template/
 ├── backend/    Go API — Gin · pgx/sqlc · JWT auth · policy/RBAC authz   (modular monolith; see backend/README.md)
 ├── frontend/   React 19 + TypeScript — Vite · MobX · MUI · axios        (see frontend/README.md)
-└── docker-compose.yml   db (Postgres) + migrate (goose) + api + frontend
+└── docker-compose.yml   db (Postgres) + redis + migrate (goose) + api + frontend
 ```
 
 - **Backend**: see [backend/README.md](backend/README.md) for the architecture
@@ -78,7 +78,7 @@ Backend (needs Go 1.26+ and a Postgres):
 ```bash
 cd backend
 cp .env.example .env
-docker compose up -d db          # or your own Postgres
+docker compose up -d db redis    # or your own Postgres + Redis
 DB_HOST=localhost make migrate-up
 make run                          # API on :3000
 ```

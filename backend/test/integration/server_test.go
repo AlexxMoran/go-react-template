@@ -11,7 +11,10 @@ import (
 	"time"
 
 	"github.com/yourorg/goapp/internal/app"
+	"github.com/yourorg/goapp/internal/notifications"
+	"github.com/yourorg/goapp/internal/platform/cache"
 	"github.com/yourorg/goapp/internal/platform/config"
+	"github.com/yourorg/goapp/internal/platform/jobs"
 	"github.com/yourorg/goapp/internal/platform/logger"
 )
 
@@ -32,8 +35,12 @@ func newTestServer() http.Handler {
 			RefreshTTL:    24 * time.Hour,
 		},
 		RateLimit: config.RateLimitConfig{Enabled: false},
+		Redis:     config.RedisConfig{Addr: redisAddr},
 	}
-	return app.NewServer(cfg, logger.New("test", "error"), pool)
+	// These tests don't register or read cached articles, so a lazy job client
+	// (no dial until enqueue) and a no-op cache are enough.
+	notifier := notifications.NewEnqueuer(jobs.NewClient(cfg.Redis))
+	return app.NewServer(cfg, logger.New("test", "error"), pool, notifier, cache.Nop{})
 }
 
 func TestServer_HealthLive(t *testing.T) {

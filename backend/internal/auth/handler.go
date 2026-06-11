@@ -21,13 +21,14 @@ const refreshCookieName = "refresh_token"
 type Handler struct {
 	svc        *Service
 	users      Users
+	notifier   Notifier
 	cookie     config.CookieConfig
 	refreshTTL time.Duration
 	logger     *slog.Logger
 }
 
-func NewHandler(svc *Service, users Users, cookie config.CookieConfig, refreshTTL time.Duration, logger *slog.Logger) *Handler {
-	return &Handler{svc: svc, users: users, cookie: cookie, refreshTTL: refreshTTL, logger: logger}
+func NewHandler(svc *Service, users Users, notifier Notifier, cookie config.CookieConfig, refreshTTL time.Duration, logger *slog.Logger) *Handler {
+	return &Handler{svc: svc, users: users, notifier: notifier, cookie: cookie, refreshTTL: refreshTTL, logger: logger}
 }
 
 func (h *Handler) Register(c *gin.Context) {
@@ -40,6 +41,13 @@ func (h *Handler) Register(c *gin.Context) {
 	if err != nil {
 		httpx.WriteError(c, h.logger, err)
 		return
+	}
+	// Best-effort async side effect: a failed notification must not fail
+	// registration. The notifications module turns this into a welcome email.
+	if h.notifier != nil {
+		if err := h.notifier.NotifyWelcome(c.Request.Context(), u.ID, u.Email, u.FirstName); err != nil {
+			h.logger.Warn("notify welcome", slog.String("err", err.Error()))
+		}
 	}
 	httpx.Data(c, http.StatusCreated, userapi.ToResponse(u))
 }

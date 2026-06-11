@@ -14,23 +14,34 @@ import (
 	"github.com/yourorg/goapp/test/testsupport"
 )
 
-// pool is the shared connection to the suite's PostgreSQL container. It is
-// started once for the whole package by TestMain; individual tests isolate
-// themselves with testsupport.Truncate.
-var pool *pgxpool.Pool
+// Shared per-package fixtures, started once by TestMain. Tests isolate the
+// database with testsupport.Truncate.
+var (
+	pool      *pgxpool.Pool
+	redisAddr string
+)
 
 func TestMain(m *testing.M) {
 	ctx := context.Background()
 
 	pg, err := testsupport.StartPostgres(ctx)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "integration setup failed:", err)
+		fmt.Fprintln(os.Stderr, "integration setup failed (postgres):", err)
 		os.Exit(1)
 	}
 	pool = pg.Pool
 
+	rd, err := testsupport.StartRedis(ctx)
+	if err != nil {
+		pg.Close(ctx)
+		fmt.Fprintln(os.Stderr, "integration setup failed (redis):", err)
+		os.Exit(1)
+	}
+	redisAddr = rd.Addr
+
 	code := m.Run()
 
+	rd.Close(ctx)
 	pg.Close(ctx)
 	os.Exit(code)
 }

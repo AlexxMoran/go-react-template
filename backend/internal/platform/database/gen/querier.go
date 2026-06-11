@@ -15,6 +15,9 @@ type Querier interface {
 	CreateRefreshToken(ctx context.Context, arg CreateRefreshTokenParams) (RefreshToken, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeleteArticle(ctx context.Context, id int64) error
+	// Removes tokens that can never be used again: expired or already revoked.
+	// Run periodically by a background job so the table does not grow unbounded.
+	DeleteExpiredRefreshTokens(ctx context.Context) (int64, error)
 	GetArticleByID(ctx context.Context, id int64) (Article, error)
 	GetRefreshToken(ctx context.Context, tokenHash string) (RefreshToken, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)

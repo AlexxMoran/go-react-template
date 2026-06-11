@@ -83,6 +83,11 @@ tidy:
 sqlc:
 	go run github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION) generate
 
+## seed: insert demo data (admin/user/articles); idempotent
+.PHONY: seed
+seed:
+	go run ./cmd/seed
+
 ## migrate-up: apply all pending migrations
 .PHONY: migrate-up
 migrate-up:

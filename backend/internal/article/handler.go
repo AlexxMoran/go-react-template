@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -24,6 +25,7 @@ import (
 	"github.com/yourorg/goapp/internal/article/articleapi"
 	"github.com/yourorg/goapp/internal/article/domain"
 	"github.com/yourorg/goapp/internal/platform/authz"
+	"github.com/yourorg/goapp/internal/platform/cache"
 	"github.com/yourorg/goapp/internal/platform/httpx"
 	"github.com/yourorg/goapp/pkg/apperror"
 )
@@ -35,10 +37,12 @@ type Handler struct {
 	logger *slog.Logger
 }
 
-// NewHandler wires the module: a PostgreSQL adapter behind the application facade.
-func NewHandler(pool *pgxpool.Pool, logger *slog.Logger) *Handler {
+// NewHandler wires the module: a PostgreSQL adapter, wrapped in a read-through
+// cache, behind the application facade.
+func NewHandler(pool *pgxpool.Pool, logger *slog.Logger, c cache.Cache, ttl time.Duration) *Handler {
+	store := adapters.NewCachedStore(adapters.NewStore(pool), c, ttl)
 	return &Handler{
-		mod:    app.NewModule(adapters.NewStore(pool)),
+		mod:    app.NewModule(store),
 		logger: logger,
 	}
 }

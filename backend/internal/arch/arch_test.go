@@ -187,6 +187,31 @@ func TestGinStaysAtHTTPBoundary(t *testing.T) {
 	})
 }
 
+// TestAsynqStaysAtJobsBoundary keeps the asynq job broker out of domain and
+// application code. asynq may be imported only by the platform/jobs runtime and
+// by a module's jobs.go file (the producer/handler boundary) — the same
+// discipline as gin at the HTTP boundary.
+func TestAsynqStaysAtJobsBoundary(t *testing.T) {
+	root := moduleRoot(t)
+	found := false
+	walkGoFiles(t, filepath.Join(root, "internal"), func(path string) {
+		for _, imp := range imports(t, path) {
+			if imp != "github.com/hibiken/asynq" {
+				continue
+			}
+			found = true
+			if filepath.Base(path) == "jobs.go" || filepath.Base(filepath.Dir(path)) == "jobs" {
+				continue
+			}
+			rel, _ := filepath.Rel(root, path)
+			t.Errorf("%s: asynq must stay at the jobs boundary (a jobs.go file or platform/jobs)", rel)
+		}
+	})
+	if !found {
+		t.Fatal("no asynq imports found — update TestAsynqStaysAtJobsBoundary")
+	}
+}
+
 // TestServicesDoNotAuthorize enforces that domain service files never perform
 // authorization. Authorization belongs exclusively at the HTTP entrypoint
 // (handlers), so services stay reusable from system-triggered callers. Mirrors

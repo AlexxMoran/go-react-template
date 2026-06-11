@@ -26,6 +26,10 @@ type Config struct {
 	Cookie    CookieConfig
 	CORS      CORSConfig
 	RateLimit RateLimitConfig
+	Redis     RedisConfig
+	Jobs      JobsConfig
+	Mail      MailConfig
+	Cache     CacheConfig
 }
 
 type LogConfig struct {
@@ -52,6 +56,44 @@ type RateLimitConfig struct {
 	RPS float64
 	// Burst is the maximum momentary burst above the sustained rate.
 	Burst int
+}
+
+// RedisConfig is the connection to Redis, used as the asynq job broker.
+type RedisConfig struct {
+	Addr     string
+	Password string
+	DB       int
+}
+
+// JobsConfig configures the background-job runtime (asynq).
+type JobsConfig struct {
+	// Enabled turns the worker server and scheduler on. The enqueue client is
+	// always available; when disabled, no worker consumes the queue.
+	Enabled bool
+	// Concurrency is the number of tasks processed in parallel by the worker.
+	Concurrency int
+}
+
+// MailConfig configures outbound email. Driver "log" prints messages (dev/no-op
+// default); "smtp" sends via the configured SMTP server (e.g. Mailpit/Mailhog
+// locally, a provider in production).
+type MailConfig struct {
+	Driver string
+	From   string
+	SMTP   SMTPConfig
+}
+
+type SMTPConfig struct {
+	Host     string
+	Port     int
+	Username string
+	Password string
+}
+
+// CacheConfig configures the read-through cache (backed by Redis).
+type CacheConfig struct {
+	Enabled bool
+	TTL     time.Duration
 }
 
 func (h HTTPConfig) Addr() string {
@@ -153,6 +195,29 @@ func Load() (Config, error) {
 			Enabled: getenvBool("RATE_LIMIT_ENABLED", true),
 			RPS:     getenvFloat("RATE_LIMIT_RPS", 20),
 			Burst:   getenvInt("RATE_LIMIT_BURST", 40),
+		},
+		Redis: RedisConfig{
+			Addr:     getenv("REDIS_ADDR", "localhost:6379"),
+			Password: os.Getenv("REDIS_PASSWORD"),
+			DB:       getenvInt("REDIS_DB", 0),
+		},
+		Jobs: JobsConfig{
+			Enabled:     getenvBool("JOBS_ENABLED", true),
+			Concurrency: getenvInt("JOBS_CONCURRENCY", 10),
+		},
+		Mail: MailConfig{
+			Driver: getenv("MAIL_DRIVER", "log"),
+			From:   getenv("MAIL_FROM", "no-reply@goapp.local"),
+			SMTP: SMTPConfig{
+				Host:     getenv("SMTP_HOST", "localhost"),
+				Port:     getenvInt("SMTP_PORT", 1025),
+				Username: os.Getenv("SMTP_USERNAME"),
+				Password: os.Getenv("SMTP_PASSWORD"),
+			},
+		},
+		Cache: CacheConfig{
+			Enabled: getenvBool("CACHE_ENABLED", true),
+			TTL:     getenvDuration("CACHE_TTL", 60*time.Second),
 		},
 	}
 

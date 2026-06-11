@@ -16,6 +16,7 @@ import (
 	"github.com/yourorg/goapp/internal/article"
 	"github.com/yourorg/goapp/internal/auth"
 	"github.com/yourorg/goapp/internal/platform/authz"
+	"github.com/yourorg/goapp/internal/platform/cache"
 	"github.com/yourorg/goapp/internal/platform/config"
 	"github.com/yourorg/goapp/internal/platform/health"
 	"github.com/yourorg/goapp/internal/platform/httpx"
@@ -26,18 +27,19 @@ import (
 // NewServer constructs the application's HTTP handler with all routes and
 // middleware wired in. All dependencies are passed as arguments; nothing is read
 // from globals.
-func NewServer(cfg config.Config, logger *slog.Logger, pool *pgxpool.Pool) http.Handler {
+func NewServer(cfg config.Config, logger *slog.Logger, pool *pgxpool.Pool, notifier auth.Notifier, articleCache cache.Cache) http.Handler {
 	// ── compose dependencies ────────────────────────────────────────────────
 	// The composition root is the one place allowed to construct concrete
-	// modules and wire them together. auth consumes the user module through its
-	// own port (auth.Users); *user.Module satisfies it structurally.
+	// modules and wire them together. auth consumes the user module and the
+	// notifications module through its own ports (auth.Users, auth.Notifier);
+	// the concrete implementations are injected here.
 	jwtManager := auth.NewJWTManager(cfg.JWT)
 	userModule := user.New(pool)
 	authService := auth.NewService(pool, jwtManager, userModule)
 
-	authHandler := auth.NewHandler(authService, userModule, cfg.Cookie, jwtManager.RefreshTTL(), logger)
+	authHandler := auth.NewHandler(authService, userModule, notifier, cfg.Cookie, jwtManager.RefreshTTL(), logger)
 	userHandler := user.NewHandler(userModule, logger)
-	articleHandler := article.NewHandler(pool, logger)
+	articleHandler := article.NewHandler(pool, logger, articleCache, cfg.Cache.TTL)
 
 	authenticate := auth.Authenticate(jwtManager, logger)
 	requireAuth := authz.RequireAuth(logger)

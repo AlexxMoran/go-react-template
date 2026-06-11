@@ -25,12 +25,15 @@ import (
 // from globals.
 func NewServer(cfg config.Config, logger *slog.Logger, pool *pgxpool.Pool) http.Handler {
 	// ── compose dependencies ────────────────────────────────────────────────
+	// The composition root is the one place allowed to construct concrete
+	// modules and wire them together. auth consumes the user module through its
+	// own port (auth.Users); *user.Module satisfies it structurally.
 	jwtManager := auth.NewJWTManager(cfg.JWT)
-	authService := auth.NewService(pool, jwtManager)
-	userQueries := user.NewQueries(pool)
+	userModule := user.New(pool)
+	authService := auth.NewService(pool, jwtManager, userModule)
 
-	authHandler := auth.NewHandler(authService, userQueries, cfg.Cookie, jwtManager.RefreshTTL(), logger)
-	userHandler := user.NewHandler(pool, logger)
+	authHandler := auth.NewHandler(authService, userModule, cfg.Cookie, jwtManager.RefreshTTL(), logger)
+	userHandler := user.NewHandler(userModule, logger)
 	articleHandler := article.NewHandler(pool, logger)
 
 	authenticate := auth.Authenticate(jwtManager, logger)

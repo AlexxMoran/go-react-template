@@ -15,7 +15,7 @@ import (
 
 	"github.com/yourorg/goapp/internal/platform/authz"
 	"github.com/yourorg/goapp/internal/platform/config"
-	"github.com/yourorg/goapp/internal/user"
+	"github.com/yourorg/goapp/internal/user/userapi"
 	"github.com/yourorg/goapp/pkg/apperror"
 )
 
@@ -64,7 +64,7 @@ func NewJWTManager(cfg config.JWTConfig) *JWTManager {
 func (m *JWTManager) RefreshTTL() time.Duration { return m.refreshTTL }
 
 // GenerateAccess signs a short-lived access token for the user.
-func (m *JWTManager) GenerateAccess(u user.User) (string, error) {
+func (m *JWTManager) GenerateAccess(u userapi.User) (string, error) {
 	now := time.Now()
 	claims := AccessClaims{
 		Role:  string(u.Role),

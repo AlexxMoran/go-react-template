@@ -69,11 +69,12 @@ func walkGoFiles(t *testing.T, root string, fn func(path string)) {
 	}
 }
 
-// TestDecisionsArePure enforces that operation decision layers contain only pure
-// business rules: no database driver, no generated DB code, and no HTTP/router
-// packages. This keeps them unit-testable without a database — exactly the
-// invariant guarded on the Python decisions layer.
-func TestDecisionsArePure(t *testing.T) {
+// TestDomainIsPure enforces that every module's domain package contains only
+// pure business rules: no database driver, no generated DB code, and no
+// HTTP/router packages. This keeps the model, status machine, policy and
+// decisions unit-testable without a database — the invariant the synthesis
+// architecture is built on.
+func TestDomainIsPure(t *testing.T) {
 	root := moduleRoot(t)
 	forbidden := []string{
 		"github.com/jackc/pgx",
@@ -84,7 +85,7 @@ func TestDecisionsArePure(t *testing.T) {
 
 	checked := 0
 	walkGoFiles(t, filepath.Join(root, "internal"), func(path string) {
-		if filepath.Base(path) != "decisions.go" || !strings.Contains(filepath.ToSlash(path), "/operation/") {
+		if filepath.Base(filepath.Dir(path)) != "domain" {
 			return
 		}
 		checked++
@@ -92,14 +93,70 @@ func TestDecisionsArePure(t *testing.T) {
 			for _, bad := range forbidden {
 				if strings.Contains(imp, bad) {
 					rel, _ := filepath.Rel(root, path)
-					t.Errorf("%s: decision layer must not import %q (keep it pure)", rel, imp)
+					t.Errorf("%s: domain package must not import %q (keep it pure)", rel, imp)
 				}
 			}
 		}
 	})
 	if checked == 0 {
-		t.Fatal("no operation decisions.go files were checked")
+		t.Fatal("no domain package files were checked")
 	}
+}
+
+// TestModuleBoundaries enforces that domain modules talk to each other only
+// through their published `*api` package. A file in internal/<A>/ may import
+// internal/<B>/... only when the import is internal/<B>/<B>api (or a subpackage
+// of it). Platform packages are a shared kernel and stay importable everywhere;
+// the composition root (internal/app) and these arch tests are exempt as
+// sources because wiring modules together is precisely their job.
+func TestModuleBoundaries(t *testing.T) {
+	root := moduleRoot(t)
+	const modulePrefix = "github.com/yourorg/goapp/internal/"
+	exemptSource := map[string]bool{"platform": true, "arch": true, "app": true}
+
+	internalDir := filepath.Join(root, "internal")
+	checked := 0
+	walkGoFiles(t, internalDir, func(path string) {
+		ownModule := moduleOf(path, internalDir)
+		if ownModule == "" || exemptSource[ownModule] {
+			return
+		}
+		for _, imp := range imports(t, path) {
+			if !strings.HasPrefix(imp, modulePrefix) {
+				continue
+			}
+			segs := strings.Split(strings.TrimPrefix(imp, modulePrefix), "/")
+			target := segs[0]
+			if target == ownModule || target == "platform" {
+				continue // same module or shared kernel
+			}
+			if len(segs) >= 2 && segs[1] == target+"api" {
+				continue // the other module's published contract
+			}
+			rel, _ := filepath.Rel(root, path)
+			t.Errorf("%s: module %q may reach module %q only via %s/%sapi, not %q",
+				rel, ownModule, target, target, target, imp)
+		}
+		checked++
+	})
+	if checked == 0 {
+		t.Fatal("no module files were checked")
+	}
+}
+
+// moduleOf returns the module segment for a file under internalDir (e.g.
+// internal/user/userapi/userapi.go -> "user"), or "" if the file sits directly
+// in internal/.
+func moduleOf(path, internalDir string) string {
+	rel, err := filepath.Rel(internalDir, path)
+	if err != nil {
+		return ""
+	}
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	if len(parts) < 2 {
+		return ""
+	}
+	return parts[0]
 }
 
 // TestGinStaysAtHTTPBoundary keeps the framework context from leaking into

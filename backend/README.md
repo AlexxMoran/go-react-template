@@ -12,8 +12,9 @@ idiomatic Go, and ships with everything a new service needs on day one:
   tokens (stored hashed for revocation), passwords hashed with bcrypt.
 - **Authorization**: a Pundit-style **policy layer** combined with **RBAC** roles,
   with per-record permissions surfaced to the frontend.
-- **Architecture guardrails** enforced as tests (pure decision layers, services
-  that never authorize).
+- **Architecture guardrails** enforced as tests: module boundaries (cross-module
+  access only through a module's published `*api` package), pure `domain` cores,
+  and Gin confined to the HTTP boundary.
 
 > The module path is `github.com/yourorg/goapp`. Rename it for your project:
 > ```bash
@@ -40,22 +41,30 @@ idiomatic Go, and ships with everything a new service needs on day one:
 
 ## Architecture
 
-The service is split into layers with strict, one-directional dependencies.
+The service is a **modular monolith**. Each domain is a self-contained module
+with strict, one-directional internal layers; modules talk to one another **only**
+through a published `*api` contract, never by reaching into each other's internals.
 
 ```
 cmd/api                 process entrypoint (tiny main → app.Run)
 internal/
-  app/                  wiring: NewServer(deps) http.Handler + Run(ctx)
-  platform/             cross-cutting platform support
+  app/                  composition root: NewServer(deps) http.Handler + Run(ctx)
+  platform/             shared kernel (importable by every module)
     config/             typed configuration from the environment
     database/           pgx pool + sqlc-generated code (gen/)
     logger/             slog setup
     httpx/              response envelopes, decode/validate, error rendering
     middleware/         recover, request logging, CORS
     authz/              Actor, RBAC roles, Authorize(), auth middleware
-  auth/                 authentication: JWT, password, login/refresh/logout/me
-  user/                 user domain: model, read/write, policy, dto
-  article/              example domain (full pattern, see below)
+  auth/                 authentication module: JWT, password, login/refresh/logout/me
+  user/                 user module (minimal): facade + read/write internals
+    userapi/            published contract (User DTO, Response, Permissions)
+  article/              reference module — full synthesis layout (see below)
+    articleapi/         published contract (Response)
+    domain/             pure core: model, status machine, policy, publish decision
+    app/                application: operations (write) + queries (read) + facade
+    adapters/           PostgreSQL implementation of the app's Store port
+    handler.go/routes.go/dto.go    HTTP boundary + wiring
 pkg/
   apperror/             the one application error type (status + message_key)
 db/
@@ -63,38 +72,57 @@ db/
   queries/              sqlc query definitions
 ```
 
-### Layer responsibilities
+### Module boundaries
+
+A module is a bounded context. Other modules depend on it **only** through its
+`<module>api` package — a thin contract of DTOs (and rendering helpers) with no
+database or HTTP types. The consumer declares its own narrow **port** over that
+contract and receives the provider's facade at the composition root:
+
+```go
+// auth declares only what it needs (consumer-side port, in terms of userapi)
+type Users interface {
+    GetByEmail(ctx context.Context, email string) (userapi.User, error)
+    Create(ctx context.Context, p userapi.CreateParams) (userapi.User, error)
+    // …
+}
+// server.go injects the concrete *user.Module, which satisfies it structurally
+authService := auth.NewService(pool, jwtManager, userModule)
+```
+
+`TestModuleBoundaries` fails the build if a module imports another module's
+internals instead of its `*api` package.
+
+### The synthesis layout (write = operations, read = queries)
+
+Inside a module there is **one way to write** (an operation) and **one way to
+read** (a query), both exposed through the application facade (`app.Module`):
 
 | Layer | Does | Must **not** |
 |---|---|---|
-| `handler` (HTTP) | parse/validate input, **authorize**, call service/operation, render response | hold business rules |
-| `operation/<verb>` | multi-step business behavior in a transaction | live in a giant service file |
-| `service` | simple single-step CRUD | perform authorization |
-| `repository` | writes (INSERT/UPDATE/DELETE) | contain business rules |
-| `queries` / `search` | reads (SELECT) | mutate |
-| `policy` | answer "can this actor do X?" | touch the database |
-| `decisions` (in operations) | **pure** business rules over a snapshot | import a DB driver, HTTP, or Gin |
+| `handler` (HTTP) | parse/validate input, **authorize**, call the facade, render | hold business rules |
+| `app` operations | write use-cases (commands): simple = one call, multi-step = orchestrate load → decide → apply | touch the DB driver directly |
+| `app` queries | read use-cases | mutate |
+| `domain` | **pure** model, status machine, policy and decisions | import a DB driver, HTTP, or Gin |
+| `adapters` | all DB I/O behind the app's `Store` port; owns transactions; maps rows ↔ domain | contain business rules |
 
-### The operation pattern
+### Operations and the pure decision
 
-Meaningful multi-step behavior lives in `internal/<domain>/operation/<verb>/`
-rather than in large service files. Each operation is a self-contained package
-that follows one data flow (see [internal/article/operation/publish](internal/article/operation/publish)):
+A simple write is a single facade method (`Create` / `Update` / `Delete`). A
+multi-step write keeps the **decision pure** and the **transaction in the
+adapter**. The publish operation (see [internal/article](internal/article)) flows:
 
 ```
-Contract → Scenario → Gateway.Load → Snapshot → Decisions.Make → Decision → Gateway.Apply → Result
+handler.Publish → app.Module.Publish → adapters.Store.RunPublish (one tx)
+                                         ├─ load facts → domain.PublishSnapshot
+                                         ├─ domain.DecidePublish(snapshot, now)   ← pure, no I/O
+                                         └─ apply domain.PublishDecision → commit
 ```
 
-| File | Role |
-|---|---|
-| `contract.go` | the input (plain struct) |
-| `structures.go` | `Snapshot` (facts loaded from DB) and `Decision` (the write plan) — plain values |
-| `decisions.go` | **pure** business rules; takes a `Snapshot` (+ `now`), returns a `Decision` or error. No I/O. |
-| `gateway.go` | all DB reads/writes, bound to one transaction; translates rows ↔ operation data |
-| `scenario.go` | orchestration: begin tx → load → decide → apply → commit |
-
-Because `decisions.go` is pure, it is unit-tested with **no database**
-(see [decisions_test.go](internal/article/operation/publish/decisions_test.go)).
+`domain.DecidePublish` takes plain facts plus `now` and returns a write plan or an
+error, so it is unit-tested with **no database**
+(see [domain/publish_test.go](internal/article/domain/publish_test.go)).
+`TestDomainIsPure` keeps the whole `domain` package free of drivers, HTTP and Gin.
 
 ---
 
@@ -128,6 +156,46 @@ Every list/detail response includes a `permissions` map (`{"edit": true, ...}`)
 computed from the policy, so the **frontend can show/hide actions** without
 re-implementing the rules. This mirrors the source FastAPI project's
 `get_permissions` behavior.
+
+---
+
+## Testing
+
+Two layers, split by where they live and what they touch:
+
+- **Unit tests — colocated, fast, no I/O.** They sit next to the code (Go requires
+  a package's tests to share its directory), preferably as black-box
+  `package <pkg>_test`. The pure `domain` decisions and policies are tested with
+  no database ([article/domain](internal/article/domain)); the application layer
+  is tested with an in-memory fake of its `Store` port
+  ([article/app/module_test.go](internal/article/app/module_test.go)) — the
+  payoff of depending on an interface.
+- **Integration tests — separated, database-backed.** They live under
+  [test/](test), not in the package folders, and drive the modules through their
+  public seams (the app facades, the auth service) against a **real PostgreSQL**
+  started with [testcontainers](https://golang.testcontainers.org/). Migrations
+  are applied with goose and each test truncates between runs. They compile only
+  under the `integration` build tag, so the default test run needs neither Docker
+  nor the testcontainers dependency tree.
+
+```
+test/
+  testsupport/   start a PostgreSQL container, run migrations, truncate helper
+  integration/   TestMain (one container per package) + behavioral *_test.go
+```
+
+```bash
+make test              # unit tests only — fast, no Docker
+make test-integration  # database-backed tests — needs Docker
+make test-all          # both
+make cover             # unit coverage summary
+```
+
+> Why a real database instead of a mock or SQLite? The data layer is
+> sqlc-generated Postgres SQL (transactions, `RETURNING`, `pgtype`, constraints).
+> Only a real PostgreSQL proves it actually behaves — e.g. that the publish
+> transaction commits and re-publishing is then rejected, or that a rotated
+> refresh token can't be reused.
 
 ---
 
@@ -176,7 +244,9 @@ curl -s -X POST localhost:3000/api/v1/articles/1/publish -H "Authorization: Bear
 ```bash
 make help            # list all targets
 make run             # run the API locally
-make test            # run all tests (incl. architecture guardrails)
+make test            # unit tests (incl. architecture guardrails); no database
+make test-integration # database-backed tests via testcontainers (needs Docker)
+make cover           # unit-test coverage summary
 make fmt / fmt-check # apply or verify Go formatting rules
 make vet / make lint # static analysis
 make sqlc            # regenerate type-safe DB code after editing db/queries
@@ -187,20 +257,30 @@ make docker-up       # full stack via docker compose
 
 ---
 
-## How to add a new domain
+## How to add a new module
 
-1. Add the table in `db/migrations/` (goose), and queries in `db/queries/`.
+Copy the `article` module — it is the reference implementation.
+
+1. Add the table in `db/migrations/` (goose) and queries in `db/queries/`.
 2. `make sqlc` to regenerate `internal/platform/database/gen`.
-3. Create `internal/<domain>/` with `model.go`, `repository.go` (writes),
-   `queries.go` (reads), `policy.go`, `dto.go`, `service.go`, `handler.go`,
-   `routes.go`.
-4. For multi-step behavior, add `internal/<domain>/operation/<verb>/`
-   (contract / structures / decisions / gateway / scenario) — copy the
-   `article/operation/publish` package as a starting point.
+3. Create `internal/<module>/` with:
+   - `domain/` — the pure core: `model`, `policy`, status machine, and any
+     `Decide…` functions. No DB, no HTTP.
+   - `<module>api/` — the published contract: the `Response` DTO (and any types
+     other modules will consume).
+   - `app/` — the `Module` facade plus a `Store` port; operations (write) in
+     `commands.go`, queries (read) in `queries.go`.
+   - `adapters/` — the PostgreSQL implementation of `Store` (the only place that
+     imports `gen`/pgx), mapping rows ↔ `domain`.
+   - `handler.go` / `routes.go` / `dto.go` — the HTTP boundary and `NewHandler`
+     wiring (authorize here, via the domain policy).
+4. To consume another module, declare a narrow port interface over **its**
+   `*api` package and accept its facade at the composition root — never import
+   the other module's internals.
 5. Mount the routes in [internal/app/server.go](internal/app/server.go).
 
-The guardrail tests in [internal/arch](internal/arch) will keep the new code
-inside the layer boundaries.
+The guardrail tests in [internal/arch](internal/arch) keep the new code inside
+the layer and module boundaries.
 
 ---
 
@@ -210,9 +290,9 @@ This template is a direct translation of a FastAPI/SQLAlchemy backend:
 
 | FastAPI / Python | Here (Go) |
 |---|---|
-| `api/v1/*.py` routes | `internal/<domain>/handler.go` + `routes.go` |
-| `operations/<verb>/` | `internal/<domain>/operation/<verb>/` |
-| `modules/<d>/` (model, repository, queries, policy, state machine) | `internal/<domain>/` |
+| `api/v1/*.py` routes | `internal/<module>/handler.go` + `routes.go` |
+| `operations/<verb>/` | `internal/<module>/app` (operations) + `domain` (pure decision) |
+| `modules/<d>/` (model, repository, queries, policy, state machine) | `internal/<module>/` (`domain` + `app` + `adapters` + `<module>api`) |
 | `core/config.py` (pydantic-settings) | `internal/platform/config` |
 | `core/db` (async engine/session) | `internal/platform/database` (pgxpool) |
 | `core/permissions` (Pundit facade) | `internal/platform/authz` + per-domain `policy.go` |

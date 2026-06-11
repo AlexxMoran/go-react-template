@@ -1,34 +1,21 @@
-// Package user is the user domain: the domain model, its read (queries) and
-// write (repository) database access, its authorization policy, and its API
-// DTOs. Authentication and token issuance live in the separate auth package.
+// Package user is the user domain. Its public contract (DTOs, response shape,
+// permissions) lives in the userapi sub-package — that is the only thing other
+// modules may import. This parent package holds the module's internals: the
+// read (queries) and write (repository) database access and the Module facade
+// that composes them. Authentication and token issuance live in the separate
+// auth package, which depends on this module solely through userapi.
 package user
 
 import (
-	"time"
-
 	"github.com/yourorg/goapp/internal/platform/authz"
 	"github.com/yourorg/goapp/internal/platform/database"
 	"github.com/yourorg/goapp/internal/platform/database/gen"
+	"github.com/yourorg/goapp/internal/user/userapi"
 )
 
-// User is the domain representation of an account. HashedPassword stays inside
-// the backend and is never serialized into an API response (see dto.go).
-type User struct {
-	ID             int64
-	Email          string
-	HashedPassword string
-	Role           authz.Role
-	FirstName      string
-	LastName       string
-	IsActive       bool
-	IsVerified     bool
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-}
-
-// fromGen maps the sqlc row type to the domain model.
-func fromGen(row gen.User) User {
-	return User{
+// fromGen maps the sqlc row type to the published user model.
+func fromGen(row gen.User) userapi.User {
+	return userapi.User{
 		ID:             row.ID,
 		Email:          row.Email,
 		HashedPassword: row.HashedPassword,
@@ -40,9 +27,4 @@ func fromGen(row gen.User) User {
 		CreatedAt:      database.TimeOrZero(row.CreatedAt),
 		UpdatedAt:      database.TimeOrZero(row.UpdatedAt),
 	}
-}
-
-// AsActor builds the lightweight authorization identity for this user.
-func (u User) AsActor() *authz.Actor {
-	return &authz.Actor{ID: u.ID, Email: u.Email, Role: u.Role}
 }

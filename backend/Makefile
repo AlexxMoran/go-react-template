@@ -33,10 +33,25 @@ run:
 build:
 	go build -ldflags="-s -w" -o bin/api ./cmd/api
 
-## test: run all tests
+## test: run unit tests (fast; no database)
 .PHONY: test
 test:
 	go test ./...
+
+## test-integration: run database-backed tests (needs Docker; uses testcontainers)
+.PHONY: test-integration
+test-integration:
+	go test -tags=integration ./test/...
+
+## test-all: run unit + integration tests
+.PHONY: test-all
+test-all: test test-integration
+
+## cover: unit-test coverage summary
+.PHONY: cover
+cover:
+	go test -covermode=atomic -coverprofile=coverage.out ./...
+	go tool cover -func=coverage.out | tail -1
 
 ## vet: run go vet
 .PHONY: vet

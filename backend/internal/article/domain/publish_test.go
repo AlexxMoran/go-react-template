@@ -1,27 +1,29 @@
-package publish
+package domain_test
 
 import (
 	"testing"
 	"time"
 
+	"github.com/yourorg/goapp/internal/article/domain"
 	"github.com/yourorg/goapp/pkg/apperror"
 )
 
 // These tests exercise the business rules with no database and no HTTP — the
-// payoff of keeping the decision layer pure.
-func TestDecisions_Make_PublishesDraft(t *testing.T) {
+// payoff of keeping the decision layer pure. They live in package domain_test
+// (black-box) so they exercise only the package's exported surface.
+func TestDecidePublish_PublishesDraft(t *testing.T) {
 	now := time.Now()
-	got, err := Decisions{}.Make(Snapshot{
+	got, err := domain.DecidePublish(domain.PublishSnapshot{
 		ArticleID:  7,
-		Status:     statusDraft,
+		Status:     domain.StatusDraft,
 		Title:      "Hello",
 		HasContent: true,
 	}, now)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got.NewStatus != statusPublished {
-		t.Errorf("NewStatus = %q, want %q", got.NewStatus, statusPublished)
+	if got.NewStatus != domain.StatusPublished {
+		t.Errorf("NewStatus = %q, want %q", got.NewStatus, domain.StatusPublished)
 	}
 	if !got.PublishedAt.Equal(now) {
 		t.Errorf("PublishedAt = %v, want %v", got.PublishedAt, now)
@@ -31,18 +33,18 @@ func TestDecisions_Make_PublishesDraft(t *testing.T) {
 	}
 }
 
-func TestDecisions_Make_RejectsNonDraft(t *testing.T) {
-	_, err := Decisions{}.Make(Snapshot{
-		Status:     statusPublished,
+func TestDecidePublish_RejectsNonDraft(t *testing.T) {
+	_, err := domain.DecidePublish(domain.PublishSnapshot{
+		Status:     domain.StatusPublished,
 		Title:      "Hello",
 		HasContent: true,
 	}, time.Now())
 	assertMessageKey(t, err, "invalid_status_transition")
 }
 
-func TestDecisions_Make_RejectsEmptyContent(t *testing.T) {
-	_, err := Decisions{}.Make(Snapshot{
-		Status:     statusDraft,
+func TestDecidePublish_RejectsEmptyContent(t *testing.T) {
+	_, err := domain.DecidePublish(domain.PublishSnapshot{
+		Status:     domain.StatusDraft,
 		Title:      "Hello",
 		HasContent: false,
 	}, time.Now())

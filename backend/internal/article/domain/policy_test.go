@@ -1,8 +1,9 @@
-package article
+package domain_test
 
 import (
 	"testing"
 
+	"github.com/yourorg/goapp/internal/article/domain"
 	"github.com/yourorg/goapp/internal/platform/authz"
 )
 
@@ -11,13 +12,13 @@ func TestPolicy(t *testing.T) {
 	stranger := &authz.Actor{ID: 2, Role: authz.RoleUser}
 	admin := &authz.Actor{ID: 3, Role: authz.RoleAdmin}
 
-	draft := Article{ID: 10, AuthorID: 1, Status: StatusDraft}
-	published := Article{ID: 11, AuthorID: 1, Status: StatusPublished}
+	draft := domain.Article{ID: 10, AuthorID: 1, Status: domain.StatusDraft}
+	published := domain.Article{ID: 11, AuthorID: 1, Status: domain.StatusPublished}
 
 	tests := []struct {
 		name       string
 		actor      *authz.Actor
-		record     Article
+		record     domain.Article
 		canView    bool
 		canEdit    bool
 		canPublish bool
@@ -32,7 +33,7 @@ func TestPolicy(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			p := NewPolicy(tc.actor, tc.record)
+			p := domain.NewPolicy(tc.actor, tc.record)
 			if got := p.CanView(); got != tc.canView {
 				t.Errorf("CanView = %v, want %v", got, tc.canView)
 			}

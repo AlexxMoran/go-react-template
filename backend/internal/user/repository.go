@@ -8,30 +8,22 @@ import (
 
 	"github.com/yourorg/goapp/internal/platform/authz"
 	"github.com/yourorg/goapp/internal/platform/database/gen"
+	"github.com/yourorg/goapp/internal/user/userapi"
 	"github.com/yourorg/goapp/pkg/apperror"
 )
 
 const uniqueViolationCode = "23505"
 
-// Repository is the write side of the user domain.
-type Repository struct {
+// repository is the write side of the user domain.
+type repository struct {
 	q *gen.Queries
 }
 
-func NewRepository(db gen.DBTX) *Repository {
-	return &Repository{q: gen.New(db)}
+func newRepository(db gen.DBTX) *repository {
+	return &repository{q: gen.New(db)}
 }
 
-// CreateParams holds the fields required to create an account.
-type CreateParams struct {
-	Email          string
-	HashedPassword string
-	Role           authz.Role
-	FirstName      string
-	LastName       string
-}
-
-func (r *Repository) Create(ctx context.Context, p CreateParams) (User, error) {
+func (r *repository) Create(ctx context.Context, p userapi.CreateParams) (userapi.User, error) {
 	role := p.Role
 	if role == "" {
 		role = authz.RoleUser
@@ -46,21 +38,21 @@ func (r *Repository) Create(ctx context.Context, p CreateParams) (User, error) {
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolationCode {
-			return User{}, apperror.Conflict("email_taken", "Email is already registered")
+			return userapi.User{}, apperror.Conflict("email_taken", "Email is already registered")
 		}
-		return User{}, apperror.Internal(err)
+		return userapi.User{}, apperror.Internal(err)
 	}
 	return fromGen(row), nil
 }
 
-func (r *Repository) UpdateProfile(ctx context.Context, id int64, firstName, lastName string) (User, error) {
+func (r *repository) UpdateProfile(ctx context.Context, id int64, firstName, lastName string) (userapi.User, error) {
 	row, err := r.q.UpdateUserProfile(ctx, gen.UpdateUserProfileParams{
 		ID:        id,
 		FirstName: firstName,
 		LastName:  lastName,
 	})
 	if err != nil {
-		return User{}, apperror.Internal(err)
+		return userapi.User{}, apperror.Internal(err)
 	}
 	return fromGen(row), nil
 }

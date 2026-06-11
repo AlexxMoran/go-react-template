@@ -1,12 +1,11 @@
-package article
+package domain
 
 import "github.com/yourorg/goapp/internal/platform/authz"
 
-// Policy answers authorization questions about an article. It mirrors the Python
-// AnnouncementPolicy: published articles are world-readable, drafts are visible
-// only to their author (and admins), and only the author or an admin may edit,
-// delete or publish. can_create is record-agnostic — any authenticated user may
-// create an article.
+// Policy answers authorization questions about an article. Published articles are
+// world-readable, drafts are visible only to their author (and admins), and only
+// the author or an admin may edit, delete or publish. CanCreate is record-
+// agnostic — any authenticated user may create an article.
 type Policy struct {
 	actor  *authz.Actor
 	record Article

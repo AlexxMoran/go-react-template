@@ -12,9 +12,20 @@ import (
 
 	"github.com/yourorg/goapp/internal/platform/database"
 	"github.com/yourorg/goapp/internal/platform/database/gen"
-	"github.com/yourorg/goapp/internal/user"
+	"github.com/yourorg/goapp/internal/user/userapi"
 	"github.com/yourorg/goapp/pkg/apperror"
 )
+
+// Users is the consumer-defined port over the user module: auth depends only on
+// the slice of user behavior it actually needs, expressed in terms of the user
+// module's published contract (userapi). The composition root injects the
+// concrete *user.Module, which satisfies this interface structurally.
+type Users interface {
+	Create(ctx context.Context, p userapi.CreateParams) (userapi.User, error)
+	UpdateProfile(ctx context.Context, id int64, firstName, lastName string) (userapi.User, error)
+	GetByID(ctx context.Context, id int64) (userapi.User, error)
+	GetByEmail(ctx context.Context, email string) (userapi.User, error)
+}
 
 // TokenPair is the result of a successful login or refresh.
 type TokenPair struct {
@@ -28,29 +39,27 @@ type TokenPair struct {
 // touches the database).
 type Service struct {
 	pool  *pgxpool.Pool
-	users *user.Repository
-	userQ *user.Queries
+	users Users
 	q     *gen.Queries
 	jwt   *JWTManager
 }
 
-func NewService(pool *pgxpool.Pool, jwt *JWTManager) *Service {
+func NewService(pool *pgxpool.Pool, jwt *JWTManager, users Users) *Service {
 	return &Service{
 		pool:  pool,
-		users: user.NewRepository(pool),
-		userQ: user.NewQueries(pool),
+		users: users,
 		q:     gen.New(pool),
 		jwt:   jwt,
 	}
 }
 
 // Register creates a new account with the default user role.
-func (s *Service) Register(ctx context.Context, email, password, firstName, lastName string) (user.User, error) {
+func (s *Service) Register(ctx context.Context, email, password, firstName, lastName string) (userapi.User, error) {
 	hashed, err := HashPassword(password)
 	if err != nil {
-		return user.User{}, err
+		return userapi.User{}, err
 	}
-	return s.users.Create(ctx, user.CreateParams{
+	return s.users.Create(ctx, userapi.CreateParams{
 		Email:          email,
 		HashedPassword: hashed,
 		FirstName:      firstName,
@@ -59,20 +68,20 @@ func (s *Service) Register(ctx context.Context, email, password, firstName, last
 }
 
 // Login verifies credentials and issues a fresh token pair.
-func (s *Service) Login(ctx context.Context, email, password string) (user.User, TokenPair, error) {
-	u, err := s.userQ.GetByEmail(ctx, email)
+func (s *Service) Login(ctx context.Context, email, password string) (userapi.User, TokenPair, error) {
+	u, err := s.users.GetByEmail(ctx, email)
 	if err != nil {
-		return user.User{}, TokenPair{}, apperror.Unauthorized("invalid_credentials", "Incorrect email or password")
+		return userapi.User{}, TokenPair{}, apperror.Unauthorized("invalid_credentials", "Incorrect email or password")
 	}
 	if !CheckPassword(u.HashedPassword, password) {
-		return user.User{}, TokenPair{}, apperror.Unauthorized("invalid_credentials", "Incorrect email or password")
+		return userapi.User{}, TokenPair{}, apperror.Unauthorized("invalid_credentials", "Incorrect email or password")
 	}
 	if !u.IsActive {
-		return user.User{}, TokenPair{}, apperror.Forbidden("inactive_user", "Account is inactive")
+		return userapi.User{}, TokenPair{}, apperror.Forbidden("inactive_user", "Account is inactive")
 	}
 	pair, err := s.issueTokens(ctx, u)
 	if err != nil {
-		return user.User{}, TokenPair{}, err
+		return userapi.User{}, TokenPair{}, err
 	}
 	return u, pair, nil
 }
@@ -103,7 +112,7 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (TokenPair, 
 		return TokenPair{}, apperror.Internal(err)
 	}
 
-	u, err := s.userQ.GetByID(ctx, userID)
+	u, err := s.users.GetByID(ctx, userID)
 	if err != nil {
 		return TokenPair{}, err
 	}
@@ -111,7 +120,7 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (TokenPair, 
 }
 
 // UpdateProfile updates the current user's editable profile fields.
-func (s *Service) UpdateProfile(ctx context.Context, id int64, firstName, lastName string) (user.User, error) {
+func (s *Service) UpdateProfile(ctx context.Context, id int64, firstName, lastName string) (userapi.User, error) {
 	return s.users.UpdateProfile(ctx, id, firstName, lastName)
 }
 
@@ -126,7 +135,7 @@ func (s *Service) Logout(ctx context.Context, refreshToken string) error {
 	return nil
 }
 
-func (s *Service) issueTokens(ctx context.Context, u user.User) (TokenPair, error) {
+func (s *Service) issueTokens(ctx context.Context, u userapi.User) (TokenPair, error) {
 	access, err := s.jwt.GenerateAccess(u)
 	if err != nil {
 		return TokenPair{}, err

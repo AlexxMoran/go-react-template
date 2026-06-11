@@ -6,7 +6,7 @@ single `docker compose up`.
 
 ```
 go-react-template/
-├── backend/    Go API — chi · pgx/sqlc · JWT auth · policy/RBAC authz   (see backend/README.md)
+├── backend/    Go API — Gin · pgx/sqlc · JWT auth · policy/RBAC authz   (modular monolith; see backend/README.md)
 ├── frontend/   React 19 + TypeScript — Vite · MobX · MUI · axios        (see frontend/README.md)
 └── docker-compose.yml   db (Postgres) + migrate (goose) + api + frontend
 ```

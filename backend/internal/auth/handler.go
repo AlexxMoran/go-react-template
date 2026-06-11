@@ -11,7 +11,7 @@ import (
 	"github.com/yourorg/goapp/internal/platform/authz"
 	"github.com/yourorg/goapp/internal/platform/config"
 	"github.com/yourorg/goapp/internal/platform/httpx"
-	"github.com/yourorg/goapp/internal/user"
+	"github.com/yourorg/goapp/internal/user/userapi"
 	"github.com/yourorg/goapp/pkg/apperror"
 )
 
@@ -20,14 +20,14 @@ const refreshCookieName = "refresh_token"
 // Handler exposes the authentication HTTP endpoints.
 type Handler struct {
 	svc        *Service
-	userQ      *user.Queries
+	users      Users
 	cookie     config.CookieConfig
 	refreshTTL time.Duration
 	logger     *slog.Logger
 }
 
-func NewHandler(svc *Service, userQ *user.Queries, cookie config.CookieConfig, refreshTTL time.Duration, logger *slog.Logger) *Handler {
-	return &Handler{svc: svc, userQ: userQ, cookie: cookie, refreshTTL: refreshTTL, logger: logger}
+func NewHandler(svc *Service, users Users, cookie config.CookieConfig, refreshTTL time.Duration, logger *slog.Logger) *Handler {
+	return &Handler{svc: svc, users: users, cookie: cookie, refreshTTL: refreshTTL, logger: logger}
 }
 
 func (h *Handler) Register(c *gin.Context) {
@@ -41,7 +41,7 @@ func (h *Handler) Register(c *gin.Context) {
 		httpx.WriteError(c, h.logger, err)
 		return
 	}
-	httpx.Data(c, http.StatusCreated, user.ToResponse(u))
+	httpx.Data(c, http.StatusCreated, userapi.ToResponse(u))
 }
 
 func (h *Handler) Login(c *gin.Context) {
@@ -85,13 +85,13 @@ func (h *Handler) Logout(c *gin.Context) {
 // Me returns the current user with their global permission map.
 func (h *Handler) Me(c *gin.Context) {
 	actor, _ := authz.ActorFrom(c.Request.Context())
-	u, err := h.userQ.GetByID(c.Request.Context(), actor.ID)
+	u, err := h.users.GetByID(c.Request.Context(), actor.ID)
 	if err != nil {
 		httpx.WriteError(c, h.logger, err)
 		return
 	}
-	resp := user.ToResponse(u)
-	resp.Permissions = user.NewPolicy(actor, u).Permissions()
+	resp := userapi.ToResponse(u)
+	resp.Permissions = userapi.Permissions(actor, u)
 	httpx.Data(c, http.StatusOK, resp)
 }
 
@@ -107,7 +107,7 @@ func (h *Handler) UpdateMe(c *gin.Context) {
 		httpx.WriteError(c, h.logger, err)
 		return
 	}
-	httpx.Data(c, http.StatusOK, user.ToResponse(u))
+	httpx.Data(c, http.StatusOK, userapi.ToResponse(u))
 }
 
 // ── cookie helpers ───────────────────────────────────────────────────────────

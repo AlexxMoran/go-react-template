@@ -47,9 +47,14 @@ jobs:
         working-directory: backend
         run: go mod download
 
+      # -race needs CGO, which is on by default on ubuntu-latest.
       - name: Run unit tests
         working-directory: backend
-        run: go test ./...
+        run: go test -race -covermode=atomic -coverprofile=coverage.out ./...
+
+      - name: Coverage summary
+        working-directory: backend
+        run: go tool cover -func=coverage.out | tail -1
 
   integration:
     name: Integration tests
@@ -69,7 +74,27 @@ jobs:
         run: go mod download
 
       # ubuntu-latest ships a working Docker daemon, so testcontainers can boot a
-      # real PostgreSQL for the database-backed suite.
+      # real PostgreSQL for the database-backed suite (incl. the OpenAPI contract
+      # drift guard in test/integration/openapi_test.go).
       - name: Run integration tests
         working-directory: backend
         run: go test -tags=integration ./test/...
+
+  vuln:
+    name: Vulnerability scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      # Fails the build on advisories the code actually calls. The go.mod
+      # toolchain pin keeps the standard library on a patched release.
+      - name: govulncheck
+        working-directory: backend
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...

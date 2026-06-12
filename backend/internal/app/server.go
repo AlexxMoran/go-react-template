@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/yourorg/goapp/api"
 	"github.com/yourorg/goapp/internal/article"
 	"github.com/yourorg/goapp/internal/auth"
 	"github.com/yourorg/goapp/internal/platform/authz"
@@ -69,6 +70,10 @@ func NewServer(cfg config.Config, logger *slog.Logger, pool *pgxpool.Pool, notif
 	r.GET("/health/live", live)            // is the process up?
 	r.GET("/health/ready", ready(checker)) // can it serve traffic? (pings the DB)
 
+	// API contract: the raw spec plus an interactive docs UI.
+	r.GET("/openapi.yaml", openapiSpec)
+	r.GET("/docs", docsUI)
+
 	// Heavier protections apply to the API surface, not to health probes.
 	if cfg.RateLimit.Enabled {
 		r.Use(middleware.RateLimit(cfg.RateLimit.RPS, cfg.RateLimit.Burst, logger))
@@ -100,6 +105,29 @@ type healthResponse struct {
 func live(c *gin.Context) {
 	httpx.JSON(c, http.StatusOK, healthResponse{Status: "ok"})
 }
+
+// openapiSpec serves the embedded OpenAPI document.
+func openapiSpec(c *gin.Context) {
+	c.Data(http.StatusOK, "application/yaml; charset=utf-8", api.Spec)
+}
+
+// docsUI serves an interactive API reference (Scalar) that loads the spec.
+func docsUI(c *gin.Context) {
+	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(docsHTML))
+}
+
+const docsHTML = `<!doctype html>
+<html>
+  <head>
+    <title>goapp API</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+  </head>
+  <body>
+    <script id="api-reference" data-url="/openapi.yaml"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+  </body>
+</html>`
 
 // ready runs the dependency checks (e.g. a DB ping) and reports 200 when the
 // service can serve traffic, 503 otherwise.

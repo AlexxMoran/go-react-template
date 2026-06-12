@@ -30,7 +30,9 @@ make up
 |---|---|
 | Frontend (Vite) | http://localhost:4200 |
 | API | http://localhost:3000 |
-| API health | http://localhost:3000/health |
+| API docs (Scalar) | http://localhost:3000/docs |
+| API health | http://localhost:3000/health/ready |
+| Mailpit (email inbox) | http://localhost:8025 |
 | PostgreSQL | localhost:5433 |
 
 Try it: open the frontend, **Register**, then **Login** — you land on the

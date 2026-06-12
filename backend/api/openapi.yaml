@@ -1,0 +1,483 @@
+openapi: 3.0.3
+info:
+  title: goapp API
+  version: 0.1.0
+  description: >
+    Hand-authored OpenAPI spec — the single source of truth for the HTTP contract.
+    The backend serves it at /openapi.yaml (docs UI at /docs); the frontend
+    generates its TypeScript types from it. A contract test
+    (test/integration/openapi_test.go) validates real responses against this spec
+    to catch drift.
+servers:
+  - url: /
+tags:
+  - name: auth
+  - name: users
+  - name: articles
+  - name: health
+
+paths:
+  /health/live:
+    get:
+      tags: [health]
+      summary: Liveness probe
+      security: []
+      responses:
+        "200":
+          description: Process is up.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HealthResponse" }
+
+  /health/ready:
+    get:
+      tags: [health]
+      summary: Readiness probe (pings the database)
+      security: []
+      responses:
+        "200":
+          description: Ready to serve traffic.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HealthResponse" }
+        "503":
+          description: A dependency is unavailable.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HealthResponse" }
+
+  /api/auth/register:
+    post:
+      tags: [auth]
+      summary: Create a new account
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterRequest" }
+      responses:
+        "201":
+          description: The created user.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserEnvelope" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+
+  /api/auth/login:
+    post:
+      tags: [auth]
+      summary: Exchange credentials for an access token
+      description: >
+        Returns an access token in the body and sets the refresh token as an
+        httpOnly cookie.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+      responses:
+        "200":
+          description: A new token pair (refresh token delivered as a cookie).
+          headers:
+            Set-Cookie:
+              description: refresh_token httpOnly cookie
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TokenResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+
+  /api/auth/refresh:
+    post:
+      tags: [auth]
+      summary: Rotate the refresh token and issue a new access token
+      security:
+        - refreshCookie: []
+      responses:
+        "200":
+          description: A new token pair (the old refresh token is revoked).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TokenResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/auth/logout:
+    post:
+      tags: [auth]
+      summary: Revoke the refresh token and clear the cookie
+      security:
+        - refreshCookie: []
+      responses:
+        "200":
+          description: Logged out.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DetailResponse" }
+
+  /api/auth/me:
+    get:
+      tags: [auth]
+      summary: Get the current user
+      responses:
+        "200":
+          description: The authenticated user.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserEnvelope" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    patch:
+      tags: [auth]
+      summary: Update the current user's profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateProfileRequest" }
+      responses:
+        "200":
+          description: The updated user.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserEnvelope" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/users/:
+    get:
+      tags: [users]
+      summary: List users (authenticated directory)
+      parameters:
+        - $ref: "#/components/parameters/Skip"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: A page of users.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserListEnvelope" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/articles/:
+    get:
+      tags: [articles]
+      summary: List articles
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/Skip"
+        - $ref: "#/components/parameters/Limit"
+        - name: status
+          in: query
+          schema: { $ref: "#/components/schemas/ArticleStatus" }
+        - name: author_id
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: search
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: A page of articles.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ArticleListEnvelope" }
+    post:
+      tags: [articles]
+      summary: Create an article
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateArticleRequest" }
+      responses:
+        "201":
+          description: The created article.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ArticleEnvelope" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+
+  /api/v1/articles/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ArticleId"
+    get:
+      tags: [articles]
+      summary: Get an article
+      security: []
+      responses:
+        "200":
+          description: The article.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ArticleEnvelope" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [articles]
+      summary: Update an article
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateArticleRequest" }
+      responses:
+        "200":
+          description: The updated article.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ArticleEnvelope" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [articles]
+      summary: Delete an article
+      responses:
+        "200":
+          description: Deletion confirmation message.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DataString" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/articles/{id}/publish:
+    parameters:
+      - $ref: "#/components/parameters/ArticleId"
+    post:
+      tags: [articles]
+      summary: Publish a draft article
+      responses:
+        "200":
+          description: The published article.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ArticleEnvelope" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+    refreshCookie:
+      type: apiKey
+      in: cookie
+      name: refresh_token
+
+  parameters:
+    Skip:
+      name: skip
+      in: query
+      schema: { type: integer, minimum: 0, default: 0 }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 10 }
+    ArticleId:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+
+  schemas:
+    Permissions:
+      type: object
+      additionalProperties: { type: boolean }
+      description: Per-record action permissions for the current actor.
+
+    User:
+      type: object
+      required: [id, email, role, first_name, last_name, is_active, is_verified, created_at]
+      properties:
+        id: { type: integer, format: int64 }
+        email: { type: string, format: email }
+        role: { type: string, enum: [user, admin] }
+        first_name: { type: string }
+        last_name: { type: string }
+        is_active: { type: boolean }
+        is_verified: { type: boolean }
+        created_at: { type: string, format: date-time }
+        permissions: { $ref: "#/components/schemas/Permissions" }
+
+    ArticleStatus:
+      type: string
+      enum: [draft, published, archived]
+
+    Article:
+      type: object
+      required: [id, author_id, title, content, status, created_at, updated_at]
+      properties:
+        id: { type: integer, format: int64 }
+        author_id: { type: integer, format: int64 }
+        title: { type: string }
+        content: { type: string }
+        status: { $ref: "#/components/schemas/ArticleStatus" }
+        published_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        permissions: { $ref: "#/components/schemas/Permissions" }
+
+    TokenResponse:
+      type: object
+      required: [access_token, token_type]
+      properties:
+        access_token: { type: string }
+        token_type: { type: string, example: bearer }
+
+    RegisterRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8 }
+        first_name: { type: string }
+        last_name: { type: string }
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+
+    UpdateProfileRequest:
+      type: object
+      properties:
+        first_name: { type: string }
+        last_name: { type: string }
+
+    CreateArticleRequest:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string, maxLength: 200 }
+        content: { type: string }
+
+    UpdateArticleRequest:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string, maxLength: 200 }
+        content: { type: string }
+
+    PaginationMeta:
+      type: object
+      required: [skip, limit, filtered_count, total_count]
+      properties:
+        skip: { type: integer }
+        limit: { type: integer }
+        filtered_count: { type: integer, format: int64 }
+        total_count: { type: integer, format: int64 }
+
+    UserEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: "#/components/schemas/User" }
+
+    ArticleEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: "#/components/schemas/Article" }
+
+    UserListEnvelope:
+      allOf:
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: "#/components/schemas/User" }
+        - $ref: "#/components/schemas/PaginationMeta"
+
+    ArticleListEnvelope:
+      allOf:
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: "#/components/schemas/Article" }
+        - $ref: "#/components/schemas/PaginationMeta"
+
+    DataString:
+      type: object
+      required: [data]
+      properties:
+        data: { type: string }
+
+    DetailResponse:
+      type: object
+      required: [detail]
+      properties:
+        detail: { type: string }
+
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string }
+        checks:
+          type: object
+          additionalProperties: { type: string }
+
+    ErrorBody:
+      type: object
+      required: [message, message_key]
+      properties:
+        message: { type: string }
+        message_key: { type: string }
+        fields:
+          type: object
+          additionalProperties: { type: string }
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error: { $ref: "#/components/schemas/ErrorBody" }
+
+  responses:
+    BadRequest:
+      description: Bad request.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    Unauthorized:
+      description: Authentication required or invalid.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    Forbidden:
+      description: Not allowed.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    Conflict:
+      description: Conflict (e.g. email already registered).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    ValidationError:
+      description: Validation failed (per-field messages in error.fields).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+security:
+  - bearerAuth: []

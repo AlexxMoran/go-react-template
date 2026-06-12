@@ -221,6 +221,29 @@ unaware caching exists. Toggle with `CACHE_ENABLED` / `CACHE_TTL`.
 
 ---
 
+## API contract (OpenAPI)
+
+`api/openapi.yaml` is the **single source of truth** for the HTTP contract
+(spec-first). The server embeds it (`go:embed`) and serves:
+
+- `GET /openapi.yaml` — the raw spec
+- `GET /docs` — an interactive API reference (Scalar)
+
+The **frontend generates its TypeScript types** from the same file
+(`npm run gen:api`), so the client can't silently drift from the contract: change
+the spec, regenerate, and the TS compiler flags every call site that no longer
+matches.
+
+To keep the spec honest against the Go handlers, a **contract test**
+([test/integration/openapi_test.go](test/integration/openapi_test.go)) drives the
+real server and validates every response against the spec (kin-openapi). If a
+handler and the spec diverge, the test fails.
+
+> Workflow when changing an endpoint: edit `api/openapi.yaml` → run the contract
+> test (`make test-integration`) → regenerate the frontend types.
+
+---
+
 ## Testing
 
 Two layers, split by where they live and what they touch:

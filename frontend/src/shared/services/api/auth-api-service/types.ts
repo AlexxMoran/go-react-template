@@ -1,32 +1,10 @@
-export interface ILoginDto {
-  email: string;
-  password: string;
-}
+// These DTOs are aliases over the generated OpenAPI types (src/shared/api/schema).
+// Regenerate with `npm run gen:api` after the backend contract changes — the TS
+// compiler then flags every call site that no longer matches.
+import type { components } from "@shared/api/schema";
 
-export interface IRegisterDto {
-  email: string;
-  password: string;
-  first_name?: string;
-}
-
-export interface IAccessToken {
-  access_token: string;
-  token_type: string;
-}
-
-export interface IUserDto {
-  id: number;
-  email: string;
-  role: string;
-  first_name: string;
-  last_name: string;
-  is_active: boolean;
-  is_verified: boolean;
-  created_at: string;
-  permissions?: Record<string, boolean>;
-}
-
-export interface IEditUserDto {
-  first_name?: string;
-  last_name?: string;
-}
+export type IUserDto = components["schemas"]["User"];
+export type ILoginDto = components["schemas"]["LoginRequest"];
+export type IRegisterDto = components["schemas"]["RegisterRequest"];
+export type IAccessToken = components["schemas"]["TokenResponse"];
+export type IEditUserDto = components["schemas"]["UpdateProfileRequest"];

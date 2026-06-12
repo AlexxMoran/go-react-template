@@ -21,6 +21,7 @@ import (
 	"github.com/yourorg/goapp/internal/platform/config"
 	"github.com/yourorg/goapp/internal/platform/health"
 	"github.com/yourorg/goapp/internal/platform/httpx"
+	"github.com/yourorg/goapp/internal/platform/metrics"
 	"github.com/yourorg/goapp/internal/platform/middleware"
 	"github.com/yourorg/goapp/internal/user"
 )
@@ -61,6 +62,11 @@ func NewServer(cfg config.Config, logger *slog.Logger, pool *pgxpool.Pool, notif
 	r.Use(middleware.Recoverer(logger))
 	r.Use(middleware.SecurityHeaders(cfg.Cookie.Secure))
 	r.Use(middleware.CORS(cfg.CORS.AllowedOrigins))
+	if cfg.Metrics.Enabled {
+		registry := metrics.New()
+		r.Use(metrics.Middleware(registry))
+		r.GET("/metrics", metrics.Handler(registry))
+	}
 
 	// Health/readiness probes are registered before the rate limiter and request
 	// timeout, so frequent orchestrator probes are never throttled.

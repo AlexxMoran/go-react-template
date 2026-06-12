@@ -94,12 +94,24 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (TokenPair, 
 		return TokenPair{}, err
 	}
 
-	stored, err := s.q.GetRefreshToken(ctx, hashToken(refreshToken))
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return TokenPair{}, apperror.Internal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	qtx := s.q.WithTx(tx)
+	tokenHash := hashToken(refreshToken)
+
+	stored, err := qtx.GetRefreshToken(ctx, tokenHash)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return TokenPair{}, apperror.Unauthorized("invalid_token", "Refresh token is not recognized")
 		}
 		return TokenPair{}, apperror.Internal(err)
+	}
+	if stored.UserID != userID {
+		return TokenPair{}, apperror.Unauthorized("invalid_token", "Refresh token user mismatch")
 	}
 	if stored.RevokedAt.Valid {
 		return TokenPair{}, apperror.Unauthorized("token_revoked", "Refresh token has been revoked")
@@ -108,15 +120,35 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (TokenPair, 
 		return TokenPair{}, apperror.Unauthorized("invalid_token", "Refresh token has expired")
 	}
 
-	if err := s.q.RevokeRefreshToken(ctx, hashToken(refreshToken)); err != nil {
-		return TokenPair{}, apperror.Internal(err)
-	}
-
 	u, err := s.users.GetByID(ctx, userID)
 	if err != nil {
 		return TokenPair{}, err
 	}
-	return s.issueTokens(ctx, u)
+
+	access, err := s.jwt.GenerateAccess(u)
+	if err != nil {
+		return TokenPair{}, err
+	}
+	newRefresh, expiresAt, err := s.jwt.GenerateRefresh(u.ID)
+	if err != nil {
+		return TokenPair{}, err
+	}
+
+	if err := qtx.RevokeRefreshToken(ctx, tokenHash); err != nil {
+		return TokenPair{}, apperror.Internal(err)
+	}
+	if _, err := qtx.CreateRefreshToken(ctx, gen.CreateRefreshTokenParams{
+		UserID:    u.ID,
+		TokenHash: hashToken(newRefresh),
+		ExpiresAt: database.Timestamptz(expiresAt),
+	}); err != nil {
+		return TokenPair{}, apperror.Internal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return TokenPair{}, apperror.Internal(err)
+	}
+
+	return TokenPair{AccessToken: access, RefreshToken: newRefresh, RefreshExpiresAt: expiresAt}, nil
 }
 
 // UpdateProfile updates the current user's editable profile fields.

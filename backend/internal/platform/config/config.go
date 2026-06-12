@@ -26,6 +26,7 @@ type Config struct {
 	Cookie    CookieConfig
 	CORS      CORSConfig
 	RateLimit RateLimitConfig
+	Metrics   MetricsConfig
 	Redis     RedisConfig
 	Jobs      JobsConfig
 	Mail      MailConfig
@@ -56,6 +57,13 @@ type RateLimitConfig struct {
 	RPS float64
 	// Burst is the maximum momentary burst above the sustained rate.
 	Burst int
+}
+
+// MetricsConfig controls the optional Prometheus-compatible HTTP metrics
+// endpoint. It is intentionally small for the template: real projects can wire
+// the endpoint to Prometheus, Grafana Cloud, Datadog, or any other scraper.
+type MetricsConfig struct {
+	Enabled bool
 }
 
 // RedisConfig is the connection to Redis, used as the asynq job broker.
@@ -195,6 +203,9 @@ func Load() (Config, error) {
 			Enabled: getenvBool("RATE_LIMIT_ENABLED", true),
 			RPS:     getenvFloat("RATE_LIMIT_RPS", 20),
 			Burst:   getenvInt("RATE_LIMIT_BURST", 40),
+		},
+		Metrics: MetricsConfig{
+			Enabled: getenvBool("METRICS_ENABLED", false),
 		},
 		Redis: RedisConfig{
 			Addr:     getenv("REDIS_ADDR", "localhost:6379"),

@@ -171,7 +171,9 @@ func TestGinStaysAtHTTPBoundary(t *testing.T) {
 		"handler.go":    true,
 		"routes.go":     true,
 		"httpx.go":      true,
+		"httpx_test.go": true,
 		"middleware.go": true, // domain-local HTTP middleware (auth, authz)
+		"metrics.go":    true, // optional HTTP metrics endpoint/middleware
 	}
 	walkGoFiles(t, filepath.Join(root, "internal"), func(path string) {
 		for _, imp := range imports(t, path) {

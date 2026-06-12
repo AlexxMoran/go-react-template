@@ -4,6 +4,7 @@ package integration
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -57,6 +58,50 @@ func TestAuth_RegisterLoginRefreshRotation(t *testing.T) {
 
 	if _, err := svc.Refresh(ctx, pair.RefreshToken); err == nil {
 		t.Error("expected reuse of the rotated (revoked) refresh token to fail")
+	}
+}
+
+func TestAuth_ConcurrentRefreshAllowsOnlyOneRotation(t *testing.T) {
+	testsupport.Truncate(t, pool)
+	ctx := context.Background()
+	svc := newAuthService()
+
+	if _, err := svc.Register(ctx, "race@example.com", "password123", "Ada", "Lovelace"); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	_, pair, err := svc.Login(ctx, "race@example.com", "password123")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, err := svc.Refresh(context.Background(), pair.RefreshToken)
+			results <- err
+		}()
+	}
+
+	close(start)
+	wg.Wait()
+	close(results)
+
+	successes := 0
+	failures := 0
+	for err := range results {
+		if err == nil {
+			successes++
+			continue
+		}
+		failures++
+	}
+	if successes != 1 || failures != 1 {
+		t.Fatalf("concurrent refresh results: successes=%d failures=%d, want 1/1", successes, failures)
 	}
 }
 

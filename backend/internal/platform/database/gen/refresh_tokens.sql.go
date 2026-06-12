@@ -53,7 +53,7 @@ func (q *Queries) DeleteExpiredRefreshTokens(ctx context.Context) (int64, error)
 }
 
 const getRefreshToken = `-- name: GetRefreshToken :one
-SELECT id, user_id, token_hash, expires_at, revoked_at, created_at FROM refresh_tokens WHERE token_hash = $1
+SELECT id, user_id, token_hash, expires_at, revoked_at, created_at FROM refresh_tokens WHERE token_hash = $1 FOR UPDATE
 `
 
 func (q *Queries) GetRefreshToken(ctx context.Context, tokenHash string) (RefreshToken, error) {

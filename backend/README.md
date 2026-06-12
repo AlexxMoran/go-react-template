@@ -148,6 +148,25 @@ Classic JWT with refresh-token rotation:
 Access tokens are short-lived (15m default); they carry the user id, role and
 email, so authorization needs **no database lookup per request**.
 
+### Cookie security model
+
+The refresh token is an httpOnly cookie scoped to `/api/auth`, while the access
+token is returned in the JSON body and kept by the client. In the default Docker
+setup the browser talks to one origin (the Vite frontend proxies `/api`), so
+classic CORS/CSRF complexity stays low.
+
+For a real deployment:
+
+- Prefer same-origin frontend/API routing through a reverse proxy.
+- Set `COOKIE_SECURE=true` behind HTTPS; use `COOKIE_SAMESITE=strict` when your
+  UX allows it, `lax` for normal same-site app navigation, and `none` only for a
+  deliberate cross-site setup.
+- Keep `CORS_ALLOWED_ORIGINS` explicit; do not use wildcard origins with
+  credentialed requests.
+- If the frontend and API must be cross-site, add an Origin/CSRF check around
+  cookie-backed auth endpoints (`refresh`, `logout`, and any future endpoint
+  that relies on cookies rather than a bearer token).
+
 ## Authorization
 
 Two complementary mechanisms, both applied **only at the handler**:
@@ -302,6 +321,25 @@ DB): `/health/ready`
 > cancels the request context. Health probes are exempt from the limiter and
 > timeout so orchestrators can poll them freely.
 
+> **Metrics hook.** Set `METRICS_ENABLED=true` to expose `GET /metrics` in the
+> Prometheus text format. The template exports only basic HTTP request counters
+> and duration totals; real services can scrape it with Prometheus, Grafana
+> Cloud, VictoriaMetrics, Datadog, or replace `internal/platform/metrics` with a
+> fuller observability stack.
+
+### Production checklist
+
+Before deploying a real service from the template:
+
+- Rename the Go module from `github.com/yourorg/goapp`.
+- Generate strong JWT secrets and set `COOKIE_SECURE=true` behind HTTPS.
+- Set explicit `CORS_ALLOWED_ORIGINS` for the deployed frontend/API boundary.
+- Decide whether `METRICS_ENABLED` should be exposed publicly, privately, or not
+  at all in your infrastructure.
+- Run `make test-all`, `make lint`, and `govulncheck` in CI.
+- Review refresh-token/session retention and background-job settings for your
+  product's security model.
+
 ### Locally
 
 ```bash
@@ -374,6 +412,22 @@ Copy the `article` module — it is the reference implementation.
 
 The guardrail tests in [internal/arch](internal/arch) keep the new code inside
 the layer and module boundaries.
+
+## How to add an endpoint to an existing module
+
+For a normal HTTP endpoint, make the contract and behavior move together:
+
+1. Edit `api/openapi.yaml` first (request, response, and error examples).
+2. Add or update the request DTO in `internal/<module>/dto.go`.
+3. Put business rules in `domain/` when they can be pure, orchestration in
+   `app/commands.go` or `app/queries.go`, and database I/O in `adapters/`.
+4. Add the handler method in `handler.go`; parse/validate input, authorize with
+   the domain policy, call the facade, and render with `httpx`.
+5. Mount the route in `routes.go`.
+6. Add focused tests: pure domain/app unit tests for decisions, integration
+   tests for database-backed behavior, and an OpenAPI contract case when the
+   response shape changes.
+7. Run `make sqlc` if SQL changed, then `make test-all`.
 
 ---
 

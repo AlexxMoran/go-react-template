@@ -1,6 +1,7 @@
 package httpx
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -55,6 +56,6 @@ func testContext(method, target string) (*gin.Context, *httptest.ResponseRecorde
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(method, target, nil)
+	c.Request = httptest.NewRequestWithContext(context.Background(), method, target, nil)
 	return c, rec
 }

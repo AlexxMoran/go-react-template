@@ -19,7 +19,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     go install github.com/pressly/goose/v3/cmd/goose@latest
 
 # ── migration runner image (one-shot) ─────────────────────────────────────────
-FROM alpine:3.20 AS migrate
+FROM alpine:3.24 AS migrate
 COPY --from=goose /go/bin/goose /usr/local/bin/goose
 COPY db/migrations /migrations
 ENV GOOSE_MIGRATION_DIR=/migrations

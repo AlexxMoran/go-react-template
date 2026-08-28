@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ── build the API binary ──────────────────────────────────────────────────────
-FROM golang:1.26-alpine AS build
+FROM golang:1.27-alpine AS build
 WORKDIR /src
 
 COPY go.mod go.sum ./
@@ -13,7 +13,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/api ./cmd/api
 
 # ── goose migration tool ──────────────────────────────────────────────────────
-FROM golang:1.26-alpine AS goose
+FROM golang:1.27-alpine AS goose
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     go install github.com/pressly/goose/v3/cmd/goose@latest
